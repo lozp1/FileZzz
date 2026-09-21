@@ -11,7 +11,7 @@ typedef struct {
 } usbMtpEndpoint;
 
 static bool g_mtpInitialized = false;
-static UsbDsInterface* g_mtpInterface = nullptr;
+static UsbDsInterface* g_mtpInterface = NULL;  /* nullptr es C++, aqui es C */
 static usbMtpEndpoint g_mtpEndpoints[TOTAL_ENDPOINTS];
 static RwLock g_mtpLock;
 
@@ -25,6 +25,9 @@ Result usbMtpInitialize(void)
         return 0;
     }
 
+    /* Inicializar struct de endpoints a cero */
+    memset(g_mtpEndpoints, 0, sizeof(g_mtpEndpoints));
+
     rc = usbDsInitialize();
     if (R_FAILED(rc)) {
         rwlockWriteUnlock(&g_mtpLock);
@@ -32,7 +35,7 @@ Result usbMtpInitialize(void)
     }
 
     u8 iManufacturer = 0, iProduct = 0, iSerialNumber = 0;
-    static const u16 supported_langs[1] = {0x0409}; // en-US
+    static const u16 supported_langs[1] = {0x0409}; /* en-US */
 
     rc = usbDsAddUsbLanguageStringDescriptor(NULL, supported_langs, sizeof(supported_langs)/sizeof(u16));
     if (R_SUCCEEDED(rc)) rc = usbDsAddUsbStringDescriptor(&iManufacturer, "Nintendo");
@@ -59,12 +62,14 @@ Result usbMtpInitialize(void)
     if (R_SUCCEEDED(rc)) rc = usbDsSetUsbDeviceDescriptor(UsbDeviceSpeed_Full, &device_descriptor);
 
     device_descriptor.bcdUSB = 0x0200;
+    device_descriptor.bMaxPacketSize0 = 0x40;
     if (R_SUCCEEDED(rc)) rc = usbDsSetUsbDeviceDescriptor(UsbDeviceSpeed_High, &device_descriptor);
 
     device_descriptor.bcdUSB = 0x0300;
     device_descriptor.bMaxPacketSize0 = 0x09;
     if (R_SUCCEEDED(rc)) rc = usbDsSetUsbDeviceDescriptor(UsbDeviceSpeed_Super, &device_descriptor);
 
+    /* BOS: USB 2.0 Extension + SuperSpeed capability */
     u8 bos[0x16] = {
         0x05, USB_DT_BOS, 0x16, 0x00, 0x02,
         0x07, USB_DT_DEVICE_CAPABILITY, 0x02, 0x02, 0x00, 0x00, 0x00,
@@ -72,7 +77,7 @@ Result usbMtpInitialize(void)
     };
     if (R_SUCCEEDED(rc)) rc = usbDsSetBinaryObjectStore(bos, sizeof(bos));
 
-    // Descriptores de interfaz MTP (Clase 6, Subclase 1, Protocolo 1)
+    /* Interfaz MTP: clase 6 (Still Image / PTP), subclase 1, protocolo 1 */
     struct usb_interface_descriptor mtp_intf_desc = {
         .bLength = USB_DT_INTERFACE_SIZE,
         .bDescriptorType = USB_DT_INTERFACE,
@@ -92,6 +97,7 @@ Result usbMtpInitialize(void)
         }
     }
 
+    /* Bulk IN (host <- device) */
     struct usb_endpoint_descriptor ep_in_desc = {
         .bLength = USB_DT_ENDPOINT_SIZE,
         .bDescriptorType = USB_DT_ENDPOINT,
@@ -100,6 +106,7 @@ Result usbMtpInitialize(void)
         .wMaxPacketSize = 0x40
     };
 
+    /* Bulk OUT (host -> device) */
     struct usb_endpoint_descriptor ep_out_desc = {
         .bLength = USB_DT_ENDPOINT_SIZE,
         .bDescriptorType = USB_DT_ENDPOINT,
@@ -108,6 +115,7 @@ Result usbMtpInitialize(void)
         .wMaxPacketSize = 0x40
     };
 
+    /* Interrupt IN (eventos del dispositivo) */
     struct usb_endpoint_descriptor ep_int_desc = {
         .bLength = USB_DT_ENDPOINT_SIZE,
         .bDescriptorType = USB_DT_ENDPOINT,
@@ -123,16 +131,25 @@ Result usbMtpInitialize(void)
         &ep_int_desc
     };
 
-    struct usb_ss_endpoint_companion_descriptor endpoint_companion = {
+    /* Companion descriptor SuperSpeed (solo para bulk; interrupt usa 0) */
+    struct usb_ss_endpoint_companion_descriptor ep_companion_bulk = {
+        .bLength = USB_DT_SS_ENDPOINT_COMPANION_SIZE,
+        .bDescriptorType = USB_DT_SS_ENDPOINT_COMPANION,
+        .bMaxBurst = 0x0F,
+        .bmAttributes = 0x00,
+        .wBytesPerInterval = 0x00
+    };
+    struct usb_ss_endpoint_companion_descriptor ep_companion_int = {
         .bLength = USB_DT_SS_ENDPOINT_COMPANION_SIZE,
         .bDescriptorType = USB_DT_SS_ENDPOINT_COMPANION,
         .bMaxBurst = 0x00,
         .bmAttributes = 0x00,
-        .wBytesPerInterval = 0x00
+        .wBytesPerInterval = 0x1c  /* debe coincidir con wMaxPacketSize */
     };
 
-    // Búferes alineados a 4KB requeridos por PostBufferAsync
+    /* Buferes alineados 4 KB para PostBufferAsync */
     for (u32 i = 0; i < TOTAL_ENDPOINTS; i++) {
+        rwlockInit(&g_mtpEndpoints[i].lock);
         g_mtpEndpoints[i].buffer = (u8*)memalign(0x1000, 0x1000);
         if (g_mtpEndpoints[i].buffer == NULL) {
             rc = MAKERESULT(Module_Libnx, LibnxError_OutOfMemory);
@@ -148,73 +165,67 @@ Result usbMtpInitialize(void)
     if (R_SUCCEEDED(rc)) {
         mtp_intf_desc.bInterfaceNumber = g_mtpInterface->interface_index;
 
+        /* Asignar direcciones de endpoint (IN: bit7=1, OUT: bit7=0) */
         int ep_in_num = 1;
         int ep_out_num = 1;
         for (u32 i = 0; i < TOTAL_ENDPOINTS; i++) {
-            if ((ep_descs[i]->bEndpointAddress & USB_ENDPOINT_IN) != 0) {
-                ep_descs[i]->bEndpointAddress |= ep_in_num;
-                ep_in_num++;
+            if (ep_descs[i]->bEndpointAddress & USB_ENDPOINT_IN) {
+                ep_descs[i]->bEndpointAddress = USB_ENDPOINT_IN | ep_in_num++;
             } else {
-                ep_descs[i]->bEndpointAddress |= ep_out_num;
-                ep_out_num++;
+                ep_descs[i]->bEndpointAddress = ep_out_num++;
             }
         }
 
-        // Full Speed Config
+        /* --- Full Speed (12 Mbps) --- */
         rc = usbDsInterface_AppendConfigurationData(g_mtpInterface, UsbDeviceSpeed_Full, &mtp_intf_desc, USB_DT_INTERFACE_SIZE);
         for (u32 i = 0; R_SUCCEEDED(rc) && i < TOTAL_ENDPOINTS; i++) {
-            if (ep_descs[i]->bmAttributes == USB_TRANSFER_TYPE_BULK)
-                ep_descs[i]->wMaxPacketSize = 0x40;
-            rc = usbDsInterface_AppendConfigurationData(g_mtpInterface, UsbDeviceSpeed_Full, ep_descs[i], USB_DT_ENDPOINT_SIZE);
+            struct usb_endpoint_descriptor d = *ep_descs[i];
+            if (d.bmAttributes == USB_TRANSFER_TYPE_BULK) d.wMaxPacketSize = 0x40;
+            rc = usbDsInterface_AppendConfigurationData(g_mtpInterface, UsbDeviceSpeed_Full, &d, USB_DT_ENDPOINT_SIZE);
         }
 
-        // High Speed Config
+        /* --- High Speed (480 Mbps) --- */
         if (R_SUCCEEDED(rc)) {
             rc = usbDsInterface_AppendConfigurationData(g_mtpInterface, UsbDeviceSpeed_High, &mtp_intf_desc, USB_DT_INTERFACE_SIZE);
             for (u32 i = 0; R_SUCCEEDED(rc) && i < TOTAL_ENDPOINTS; i++) {
-                if (ep_descs[i]->bmAttributes == USB_TRANSFER_TYPE_BULK)
-                    ep_descs[i]->wMaxPacketSize = 0x200;
-                rc = usbDsInterface_AppendConfigurationData(g_mtpInterface, UsbDeviceSpeed_High, ep_descs[i], USB_DT_ENDPOINT_SIZE);
+                struct usb_endpoint_descriptor d = *ep_descs[i];
+                if (d.bmAttributes == USB_TRANSFER_TYPE_BULK) d.wMaxPacketSize = 0x200;
+                rc = usbDsInterface_AppendConfigurationData(g_mtpInterface, UsbDeviceSpeed_High, &d, USB_DT_ENDPOINT_SIZE);
             }
         }
 
-        // Super Speed Config
+        /* --- Super Speed (5 Gbps) --- */
         if (R_SUCCEEDED(rc)) {
             rc = usbDsInterface_AppendConfigurationData(g_mtpInterface, UsbDeviceSpeed_Super, &mtp_intf_desc, USB_DT_INTERFACE_SIZE);
             for (u32 i = 0; R_SUCCEEDED(rc) && i < TOTAL_ENDPOINTS; i++) {
-                if (ep_descs[i]->bmAttributes == USB_TRANSFER_TYPE_BULK) {
-                    ep_descs[i]->wMaxPacketSize = 0x400;
-                    endpoint_companion.bMaxBurst = 0x0F;
+                struct usb_endpoint_descriptor d = *ep_descs[i];
+                struct usb_ss_endpoint_companion_descriptor *comp;
+                if (d.bmAttributes == USB_TRANSFER_TYPE_BULK) {
+                    d.wMaxPacketSize = 0x400;
+                    comp = &ep_companion_bulk;
                 } else {
-                    endpoint_companion.bMaxBurst = 0x00;
+                    /* Interrupt endpoint: wMaxPacketSize igual que Full/High */
+                    comp = &ep_companion_int;
                 }
-                rc = usbDsInterface_AppendConfigurationData(g_mtpInterface, UsbDeviceSpeed_Super, ep_descs[i], USB_DT_ENDPOINT_SIZE);
+                rc = usbDsInterface_AppendConfigurationData(g_mtpInterface, UsbDeviceSpeed_Super, &d, USB_DT_ENDPOINT_SIZE);
                 if (R_SUCCEEDED(rc)) {
-                    rc = usbDsInterface_AppendConfigurationData(g_mtpInterface, UsbDeviceSpeed_Super, &endpoint_companion, USB_DT_SS_ENDPOINT_COMPANION_SIZE);
+                    rc = usbDsInterface_AppendConfigurationData(g_mtpInterface, UsbDeviceSpeed_Super, comp, USB_DT_SS_ENDPOINT_COMPANION_SIZE);
                 }
             }
         }
 
-        // Registrar endpoints con el sistema
+        /* Registrar endpoints */
         for (u32 i = 0; R_SUCCEEDED(rc) && i < TOTAL_ENDPOINTS; i++) {
             rc = usbDsInterface_RegisterEndpoint(g_mtpInterface, &g_mtpEndpoints[i].endpoint, ep_descs[i]->bEndpointAddress);
         }
 
-        // Habilitar interfaz
-        if (R_SUCCEEDED(rc)) {
-            rc = usbDsInterface_EnableInterface(g_mtpInterface);
-        }
-
-        // Habilitar dispositivo USB global
-        if (R_SUCCEEDED(rc)) {
-            rc = usbDsEnable();
-        }
+        if (R_SUCCEEDED(rc)) rc = usbDsInterface_EnableInterface(g_mtpInterface);
+        if (R_SUCCEEDED(rc)) rc = usbDsEnable();
     }
 
     if (R_SUCCEEDED(rc)) {
         g_mtpInitialized = true;
     } else {
-        // En caso de fallo, limpiar recursos
         for (u32 i = 0; i < TOTAL_ENDPOINTS; i++) {
             if (g_mtpEndpoints[i].buffer) {
                 free(g_mtpEndpoints[i].buffer);
@@ -244,6 +255,9 @@ void usbMtpExit(void)
     g_mtpInitialized = false;
 
     for (u32 i = 0; i < TOTAL_ENDPOINTS; i++) {
+        if (g_mtpEndpoints[i].endpoint) {
+            usbDsEndpoint_Cancel(g_mtpEndpoints[i].endpoint);
+        }
         rwlockWriteLock(&g_mtpEndpoints[i].lock);
         if (g_mtpEndpoints[i].buffer) {
             free(g_mtpEndpoints[i].buffer);
@@ -271,6 +285,17 @@ bool usbMtpIsActive(void)
     return active;
 }
 
+/*
+ * usbMtpWaitReady: espera hasta timeout_ns a que el host haya completado la
+ * enumeracion y la interfaz MTP este lista para transferencias.
+ * Llama esto UNA VEZ antes del primer bucle de lectura en el worker.
+ */
+Result usbMtpWaitReady(u64 timeout_ns)
+{
+    if (!g_mtpInitialized) return MAKERESULT(Module_Libnx, LibnxError_NotInitialized);
+    return usbDsWaitReady(timeout_ns);
+}
+
 size_t usbMtpTransfer(u32 endpoint, int isWrite, void* buffer, size_t size, u64 timeout_ns)
 {
     if (endpoint >= TOTAL_ENDPOINTS || !g_mtpInitialized) return 0;
@@ -295,6 +320,7 @@ size_t usbMtpTransfer(u32 endpoint, int isWrite, void* buffer, size_t size, u64 
 
     while (size > 0) {
         if (((u64)bufptr) & 0xfff) {
+            /* Buffer no alineado: usar buffer intermedio de 4KB */
             transfer_buffer = ep->buffer;
             memset(ep->buffer, 0, 0x1000);
             chunksize = 0x1000 - (((u64)bufptr) & 0xfff);
@@ -304,6 +330,7 @@ size_t usbMtpTransfer(u32 endpoint, int isWrite, void* buffer, size_t size, u64 
         } else {
             transfer_buffer = bufptr;
             chunksize = (u32)size;
+            if (chunksize > 0x1000) chunksize = 0x1000; /* chunk maximo seguro */
             transfer_type = 1;
         }
 

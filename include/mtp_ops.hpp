@@ -291,6 +291,18 @@ inline void worker() {
     std::string pendingPath;
     bool hasPending = false;
 
+    // Esperar a que Windows complete la enumeracion USB (max 30 segundos)
+    mtp_usb::mlog("MTP: esperando host...");
+    Result wrc = usbMtpWaitReady(30000000000ULL); // 30s
+    if (R_FAILED(wrc)) {
+        char wb[48];
+        snprintf(wb, sizeof(wb), "MTP: host timeout rc=0x%08X", wrc);
+        mtp_usb::mlog(wb);
+        g_active = false;
+        return;
+    }
+    mtp_usb::mlog("MTP: host listo, escuchando...");
+
     while (g_run) {
         u8 hdr[12];
         if (!epReadExact(g_epOut, hdr, 12)) continue;

@@ -22,6 +22,9 @@ bool usbMtpIsActive(void);
 // Transfiere datos por el endpoint especificado
 size_t usbMtpTransfer(u32 endpoint, int isWrite, void* buffer, size_t size, u64 timeout_ns);
 
+// Espera a que el host haya completado la enumeracion USB (llamar antes del primer read)
+Result usbMtpWaitReady(u64 timeout_ns);
+
 #ifdef __cplusplus
 }
 #endif

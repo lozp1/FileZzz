@@ -918,18 +918,22 @@ int main(int argc, char* argv[]) {
                 }
             }
         }
-        // --- PANTALLA 4: CONEXIÓN USB (MTP experimental) ---
+        // --- PANTALLA 4: CONEXIÓN USB (MTP) ---
         else if (currentScreen == SCREEN_MTP) {
             if (kDown & HidNpadButton_A) {
                 sound::play(sound::SND_ACTION);
-                if (!mtp_usb::g_ready) {
-                    logcon::push("MTP activacion manual...");
-                    mtp_usb::setup();
-                } else if (mtp_ops::running()) {
+                if (mtp_ops::running() || mtp_usb::g_ready) {
                     mtp_ops::stop();
+                    mtp_usb::teardown();
+                    logcon::push("MTP detenido");
                 } else {
-                    logcon::push("MTP transferencia experimental ON");
-                    mtp_ops::start(mtp_usb::g_epBulkIn, mtp_usb::g_epBulkOut);
+                    logcon::push("MTP iniciando conexion USB...");
+                    if (mtp_usb::setup()) {
+                        mtp_ops::start(mtp_usb::g_epBulkIn, mtp_usb::g_epBulkOut);
+                        logcon::push("MTP servidor activo!");
+                    } else {
+                        logcon::push("MTP error al inicializar USB");
+                    }
                 }
             }
             if (kDown & HidNpadButton_Y) {
@@ -1241,11 +1245,12 @@ int main(int argc, char* argv[]) {
                 }
             }
             else if (currentScreen == SCREEN_MTP) {
-                std::string mtpSt = mtp_ops::running() ? "MTP Transfer RUNNING (experimental)"
-                    : (mtp_usb::g_ready ? "MTP Listo - pulsa [A]" : "MTP Server is STOPPED");
-                renderText(renderer, fontJet, mtpSt.c_str(), 12, dbiY + rowH*1 + 4, W);
-                renderText(renderer, fontJet, "Press [A] to Toggle", 12, dbiY + rowH*2 + 4, W);
-                renderText(renderer, fontJet, "Press [B] to Exit", 12, dbiY + rowH*3 + 4, W);
+                std::string mtpSt = mtp_ops::running() ? "MTP Server is RUNNING (0x057E:0x201D)"
+                    : (mtp_usb::g_ready ? "MTP USB Ready - Press [A] to Start" : "MTP Server is STOPPED");
+                renderText(renderer, fontJet, mtpSt.c_str(), 12, dbiY + rowH*1 + 4, mtp_ops::running() ? Green : W);
+                renderText(renderer, fontJet, mtp_ops::running() ? "Press [A] to Stop MTP" : "Press [A] to Start MTP", 12, dbiY + rowH*2 + 4, W);
+                renderText(renderer, fontJet, "Press [Y] to Clear Bitacora", 12, dbiY + rowH*3 + 4, W);
+                renderText(renderer, fontJet, "Press [B] to Exit", 12, dbiY + rowH*4 + 4, W);
             }
             else if (currentScreen == SCREEN_FTP) {
                 std::string ftpSt = ftpRunning ? (std::string("FTP Server is RUNNING at ") + ftp_server::getRealIp() + ":5000") : "FTP Server is STOPPED";
@@ -1645,41 +1650,39 @@ int main(int argc, char* argv[]) {
 
             renderText(renderer, fontTitle, tr().mtp_title, 80, 26, tc.TextPrimary);
 
-            int cX = 140, cY = 95, cW = 1000, cH = 320;
+            // Botones de acción en el encabezado
+            const char* mtpBtn = mtp_ops::running() ? "[A] Detener MTP" : "[A] Activar MTP";
+            SDL_Color mtpBtnCol = mtp_ops::running() ? tc.AccentAmber : tc.AccentEmerald;
+            renderText(renderer, fontBody, mtpBtn, 820, 28, mtpBtnCol);
+            renderText(renderer, fontSmall, "[Y] Limpiar Log", 1020, 31, tc.TextMuted);
+
+            // Tarjeta de estado compacta
+            int cX = 140, cY = 95, cW = 1000, cH = 110;
             boxRGBA(renderer, cX, cY, cX + cW, cY + cH, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
-            rectangleRGBA(renderer, cX, cY, cX + cW, cY + cH, tc.BorderSubtle.r,
-                          tc.BorderSubtle.g,
-                          tc.BorderSubtle.b, 255);
+            rectangleRGBA(renderer, cX, cY, cX + cW, cY + cH,
+                          mtp_ops::running() ? tc.AccentEmerald.r : tc.BorderSubtle.r,
+                          mtp_ops::running() ? tc.AccentEmerald.g : tc.BorderSubtle.g,
+                          mtp_ops::running() ? tc.AccentEmerald.b : tc.BorderSubtle.b, 255);
 
             if (icoUsb) {
-                SDL_Rect uDst = { 640 - 24, cY + 12, 48, 48 };
+                SDL_Rect uDst = { cX + 20, cY + 20, 48, 48 };
                 SDL_RenderCopy(renderer, icoUsb, NULL, &uDst);
             }
 
-            renderTextCentered(renderer, fontTitle, tr().mtp_standby, 640, cY + 68, tc.TextSecondary);
+            renderText(renderer, fontTitle, mtp_ops::running() ? "ESTADO: SERVIDOR ACTIVO (0x057E:0x201D)" : "ESTADO: EN ESPERA",
+                       cX + 80, cY + 16, mtp_ops::running() ? tc.AccentEmerald : tc.TextSecondary);
 
-            std::string usbLine = "USB: ";
-            usbLine += usbAvailable ? usbStateName(lastUsbRaw) : "detector no disponible";
-            renderTextCentered(renderer, fontBody, usbLine, 640, cY + 104,
-                               (usbAvailable && lastUsbRaw == (int)UsbState_Configured) ? tc.AccentEmerald : tc.AccentAmber);
+            renderText(renderer, fontBody,
+                       mtp_ops::running() ? "Conecta el cable USB al PC para explorar la tarjeta SD."
+                                          : "Presiona [A] para activar el respondedor MTP e iniciar el enlace USB.",
+                       cX + 80, cY + 48, tc.TextPrimary);
 
-            boxRGBA(renderer, 440, cY + 132, 840, cY + 168, tc.BgCard.r, tc.BgCard.g, tc.BgCard.b, 255);
-            rectangleRGBA(renderer, 440, cY + 132, 840, cY + 168, tc.AccentAmber.r, tc.AccentAmber.g, tc.AccentAmber.b, 255);
-            const char* mtpBadge = "MTP: interfaz no lista";
-            if (mtp_ops::running()) mtpBadge = "MTP: TRANSFIRIENDO (experimental)";
-            else if (usbAvailable && mtp_usb::g_ready) mtpBadge = "MTP: interfaz lista";
-            renderTextCentered(renderer, fontBody, mtpBadge, 640, cY + 140, tc.AccentAmber);
+            renderText(renderer, fontSmall,
+                       "Compatible con Explorador de Windows, macOS (Android File Transfer) y Linux.",
+                       cX + 80, cY + 76, tc.TextMuted);
 
-            renderTextCentered(renderer, fontSmall, tr().mtp_hint, 640, cY + 180, tc.TextMuted);
-            renderTextCentered(renderer, fontSmall, "Si el PC no enumera el dispositivo, usa FTP.", 640, cY + 202, tc.TextPrimary);
-
-            boxRGBA(renderer, 400, cY + 232, 880, cY + 272, tc.BgCard.r, tc.BgCard.g, tc.BgCard.b, 255);
-            rectangleRGBA(renderer, 400, cY + 232, 880, cY + 272, tc.AccentEmerald.r, tc.AccentEmerald.g, tc.AccentEmerald.b, 255);
-            renderTextCentered(renderer, fontBody,
-                               mtp_ops::running() ? "[A] Detener MTP   [Y] Limpiar log" : "[A] Activar MTP   [Y] Limpiar log",
-                               640, cY + 242, tc.TextMuted);
-
-            drawLogConsole(renderer, fontSmall, 140, 425, 1000, 230, tc, 9, "CONSOLA USB");
+            // Consola de bitácora expandida (alto 435px, 17 líneas visibles)
+            drawLogConsole(renderer, fontSmall, 140, 220, 1000, 435, tc, 17, "BITÁCORA USB MTP");
 
             lineRGBA(renderer, 0, 665, 1280, 665, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
             renderText(renderer, fontSmall, tr().hint_back, 80, 680, tc.TextMuted);

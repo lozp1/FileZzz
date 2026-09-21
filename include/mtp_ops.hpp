@@ -184,21 +184,40 @@ inline const MtpObj* mtpFind(u32 h) {
     return nullptr;
 }
 
+// --- Buffer alineado a 0x1000 (4KB) requerido estrictamente por libnx PostBufferAsync ---
+inline u8* getAlignedIoBuffer() {
+    static u8* s_buf = nullptr;
+    if (!s_buf) {
+        s_buf = (u8*)memalign(0x1000, 65536);
+        if (s_buf) memset(s_buf, 0, 65536);
+    }
+    return s_buf;
+}
+
 // --- Bulk I/O (CompletionEvent + urbId, con timeout y parada) ---
 inline bool epXfer(UsbDsEndpoint* ep, u8* buf, size_t len, bool isWrite, size_t* doneOut) {
+    u8* ioBuf = getAlignedIoBuffer();
+    if (!ioBuf) return false;
+
     size_t off = 0;
     while (off < len) {
         if (!g_run) return false;
-        size_t chunk = len - off > 65536 ? 65536 : len - off;
+        size_t chunk = (len - off > 65536) ? 65536 : (len - off);
+        if (isWrite) {
+            memcpy(ioBuf, buf + off, chunk);
+        }
         u32 urb = 0;
         eventClear(&ep->CompletionEvent);
-        if (R_FAILED(usbDsEndpoint_PostBufferAsync(ep, buf + off, chunk, &urb))) return false;
+        if (R_FAILED(usbDsEndpoint_PostBufferAsync(ep, ioBuf, chunk, &urb))) return false;
         if (R_FAILED(eventWait(&ep->CompletionEvent, 5000000000ULL))) { usbDsEndpoint_Cancel(ep); return false; }
         UsbDsReportData rep;
         memset(&rep, 0, sizeof(rep));
         if (R_FAILED(usbDsEndpoint_GetReportData(ep, &rep))) return false;
         u32 req = 0, done = 0;
         if (R_FAILED(usbDsParseReportData(&rep, urb, &req, &done)) || done == 0) return false;
+        if (!isWrite) {
+            memcpy(buf + off, ioBuf, done);
+        }
         off += done;
         if (doneOut) *doneOut = off;
         if (!isWrite && done < chunk) break; // short packet = fin de fase
@@ -206,29 +225,21 @@ inline bool epXfer(UsbDsEndpoint* ep, u8* buf, size_t len, bool isWrite, size_t*
     return off == len;
 }
 inline bool epWrite(UsbDsEndpoint* ep, const u8* data, size_t len) {
-    // epXfer toma buf no-const; los datasets son pequeños: copia solo si hace falta
-    if (len <= 65536) {
-        std::vector<u8> tmp(data, data + len);
-        return epXfer(ep, tmp.data(), len, true, nullptr);
-    }
-    size_t off = 0;
-    while (off < len) {
-        if (!g_run) return false;
-        size_t chunk = len - off > 65536 ? 65536 : len - off;
-        std::vector<u8> tmp(data + off, data + off + chunk);
-        if (!epXfer(ep, tmp.data(), chunk, true, nullptr)) return false;
-        off += chunk;
-    }
-    return true;
+    std::vector<u8> tmp(data, data + len);
+    return epXfer(ep, tmp.data(), len, true, nullptr);
 }
 // Lee exactamente len bytes (fase comando/parámetros). false = parar o error.
 inline bool epReadExact(UsbDsEndpoint* ep, u8* buf, size_t len) {
+    u8* ioBuf = getAlignedIoBuffer();
+    if (!ioBuf) return false;
+
     size_t off = 0;
     while (off < len) {
         if (!g_run) return false;
+        size_t chunk = (len - off > 65536) ? 65536 : (len - off);
         u32 urb = 0;
         eventClear(&ep->CompletionEvent);
-        if (R_FAILED(usbDsEndpoint_PostBufferAsync(ep, buf + off, len - off, &urb))) return false;
+        if (R_FAILED(usbDsEndpoint_PostBufferAsync(ep, ioBuf, chunk, &urb))) return false;
         Result wr = eventWait(&ep->CompletionEvent, 500000000ULL);
         if (R_FAILED(wr)) continue; // slice de espera: re-chequea g_run
         UsbDsReportData rep;
@@ -236,6 +247,7 @@ inline bool epReadExact(UsbDsEndpoint* ep, u8* buf, size_t len) {
         if (R_FAILED(usbDsEndpoint_GetReportData(ep, &rep))) return false;
         u32 req = 0, done = 0;
         if (R_FAILED(usbDsParseReportData(&rep, urb, &req, &done)) || done == 0) return false;
+        memcpy(buf + off, ioBuf, done);
         off += done;
     }
     return true;

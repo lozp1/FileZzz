@@ -1,21 +1,11 @@
 #pragma once
-// USB-DS / MTP: Inicialización correcta para fw >= 5.0 y fw < 5.0.
-//
-// CAMBIO CLAVE respecto a la versión anterior:
-//   1. usbDsInitialize() se llama ANTES de cualquier otra llamada usb:ds.
-//   2. teardown() llama usbDsExit() para liberar el servicio.
-//   3. usbDsEnable() solo se llama en fw < 5.0 (en fw >= 5.0 la enumeración
-//      es automática una vez habilitada la interfaz).
-//   4. En fw >= 5.0, usbDsSetVidPidBcd / usbDsAddUsbStringDescriptor /
-//      usbDsSetUsbDeviceDescriptor son las funciones correctas del API nuevo.
-//   5. El VID/PID usa 0x18D1/0x4EE2 (clase de dispositivo MTP compatible con
-//      Windows sin driver extra), no el VID de Nintendo.
-//
-// Todo no-bloqueante, todos los Result verificados, sin colgar la app.
+// USB-DS / MTP: Implementación moderna para firmware >= 5.0.0 (Atmosphere / Horizon)
+// Siguiendo la especificación exacta de libnx usb_comms.c
 #include <switch.h>
 #include <cstring>
 #include <string>
 #include <cstdio>
+#include <malloc.h>
 
 namespace mtp_usb {
 
@@ -29,184 +19,214 @@ inline UsbDsEndpoint*  g_epBulkIn  = nullptr;
 inline UsbDsEndpoint*  g_epBulkOut = nullptr;
 inline UsbDsEndpoint*  g_epIntrIn  = nullptr;
 inline bool            g_ready     = false;
-inline bool            g_usbInited = false;   // ← nuevo: rastrea si llamamos usbDsInitialize
+inline bool            g_usbInited = false;
 inline u8              g_lastSetup[32] = {0};
 inline bool            g_haveLastSetup = false;
 
 inline const char* rcStr(Result rc) {
-    static char b[20];
+    static char b[32];
     snprintf(b, sizeof(b), "rc=0x%X", rc);
     return b;
 }
 
-// Cierra endpoints, interfaz y libera el servicio usb:ds.
 inline void teardown() {
+    g_ready = false;
     if (g_epBulkIn)  { usbDsEndpoint_Close(g_epBulkIn);  g_epBulkIn  = nullptr; }
     if (g_epBulkOut) { usbDsEndpoint_Close(g_epBulkOut); g_epBulkOut = nullptr; }
     if (g_epIntrIn)  { usbDsEndpoint_Close(g_epIntrIn);  g_epIntrIn  = nullptr; }
     if (g_iface)     { usbDsInterface_Close(g_iface);     g_iface     = nullptr; }
-    if (g_usbInited) { usbDsExit(); g_usbInited = false; }   // ← CLAVE
-    g_ready = false;
+    if (g_usbInited) { usbDsExit(); g_usbInited = false; }
     g_haveLastSetup = false;
 }
 
-// Registra y habilita la interfaz MTP. Retorna true si quedó lista para USB bulk.
+// Inicialización de dispositivo USB MTP (Clase 6/1/1 PIMA 15470)
 inline bool setup() {
-    teardown();   // Siempre limpiamos antes
+    teardown();
 
-    // ── PASO 1: Inicializar el servicio usb:ds ────────────────────────────────
     Result rc = usbDsInitialize();
     if (R_FAILED(rc)) {
-        mlog(std::string("MTP usbDsInit ERR ") + rcStr(rc));
+        mlog(std::string("usbDsInit ERR ") + rcStr(rc));
         return false;
     }
     g_usbInited = true;
-    mlog("MTP usbDsInitialize OK");
 
-    // ── PASO 2: Información del dispositivo (VID/PID MTP genérico) ────────────
-    // 0x18D1:0x4EE2 = Google/Android MTP → Windows lo reconoce sin driver extra
-    UsbDsDeviceInfo devInfo;
-    memset(&devInfo, 0, sizeof(devInfo));
-    devInfo.idVendor  = 0x18D1;
-    devInfo.idProduct = 0x4EE2;
-    devInfo.bcdDevice = 0x0200;
-    snprintf(devInfo.Manufacturer, sizeof(devInfo.Manufacturer), "EzFiles");
-    snprintf(devInfo.Product,      sizeof(devInfo.Product),      "EzFiles SD Card");
-    snprintf(devInfo.SerialNumber, sizeof(devInfo.SerialNumber), "EZF00000001");
+    // String Descriptors
+    u8 iManufacturer = 0, iProduct = 0, iSerialNumber = 0;
+    static const u16 supported_langs[1] = {0x0409}; // English (US)
+    rc = usbDsAddUsbLanguageStringDescriptor(NULL, supported_langs, 1);
+    if (R_FAILED(rc)) { mlog(std::string("langDesc ERR ") + rcStr(rc)); teardown(); return false; }
 
-    rc = usbDsSetVidPidBcd(&devInfo);
-    if (R_FAILED(rc)) {
-        mlog(std::string("MTP VidPid ERR ") + rcStr(rc));
-        teardown();
-        return false;
-    }
-    mlog("MTP VidPid OK (0x18D1:0x4EE2)");
+    rc = usbDsAddUsbStringDescriptor(&iManufacturer, "Nintendo");
+    if (R_FAILED(rc)) { mlog(std::string("strMan ERR ") + rcStr(rc)); teardown(); return false; }
 
-    // ── PASO 3: String descriptors ───────────────────────────────────────────
-    u8 iMan = 0, iProd = 0, iSer = 0;
-    if (R_FAILED(rc = usbDsAddUsbStringDescriptor(&iMan,  "EzFiles")))         { mlog(std::string("MTP strMan ERR ")  + rcStr(rc)); teardown(); return false; }
-    if (R_FAILED(rc = usbDsAddUsbStringDescriptor(&iProd, "EzFiles SD Card"))) { mlog(std::string("MTP strProd ERR ") + rcStr(rc)); teardown(); return false; }
-    if (R_FAILED(rc = usbDsAddUsbStringDescriptor(&iSer,  "EZF00000001")))     { mlog(std::string("MTP strSer ERR ")  + rcStr(rc)); teardown(); return false; }
-    mlog("MTP string descriptors OK");
+    rc = usbDsAddUsbStringDescriptor(&iProduct, "Nintendo Switch");
+    if (R_FAILED(rc)) { mlog(std::string("strProd ERR ") + rcStr(rc)); teardown(); return false; }
 
-    // ── PASO 4: Device descriptor (Full Speed y High Speed) ──────────────────
+    rc = usbDsAddUsbStringDescriptor(&iSerialNumber, "000000000001");
+    if (R_FAILED(rc)) { mlog(std::string("strSer ERR ") + rcStr(rc)); teardown(); return false; }
+
+    // Device Descriptors (Full, High, Super Speed)
+    // 0x057E:0x201D = Nintendo Switch MTP Responder (usado por DBI / NXMTP)
     struct usb_device_descriptor devDesc;
     memset(&devDesc, 0, sizeof(devDesc));
     devDesc.bLength            = USB_DT_DEVICE_SIZE;
     devDesc.bDescriptorType    = USB_DT_DEVICE;
-    devDesc.bcdUSB             = 0x0200;   // USB 2.0
-    devDesc.bDeviceClass       = 0x00;     // Defined at interface level
+    devDesc.bcdUSB             = 0x0110;
+    devDesc.bDeviceClass       = 0x00; // Definido en la interfaz
     devDesc.bDeviceSubClass    = 0x00;
     devDesc.bDeviceProtocol    = 0x00;
-    devDesc.bMaxPacketSize0    = 64;
-    devDesc.idVendor           = 0x18D1;
-    devDesc.idProduct          = 0x4EE2;
-    devDesc.bcdDevice          = 0x0200;
-    devDesc.iManufacturer      = iMan;
-    devDesc.iProduct           = iProd;
-    devDesc.iSerialNumber      = iSer;
-    devDesc.bNumConfigurations = 1;
+    devDesc.bMaxPacketSize0    = 0x40;
+    devDesc.idVendor           = 0x057E; // Nintendo
+    devDesc.idProduct          = 0x201D; // Switch MTP
+    devDesc.bcdDevice          = 0x0100;
+    devDesc.iManufacturer      = iManufacturer;
+    devDesc.iProduct           = iProduct;
+    devDesc.iSerialNumber      = iSerialNumber;
+    devDesc.bNumConfigurations = 0x01;
 
-    if (R_FAILED(rc = usbDsSetUsbDeviceDescriptor(UsbDeviceSpeed_Full, &devDesc))) {
-        mlog(std::string("MTP devDescFS ERR ") + rcStr(rc)); teardown(); return false;
-    }
-    if (R_FAILED(rc = usbDsSetUsbDeviceDescriptor(UsbDeviceSpeed_High, &devDesc))) {
-        mlog(std::string("MTP devDescHS ERR ") + rcStr(rc)); teardown(); return false;
-    }
-    mlog("MTP device descriptor OK");
+    rc = usbDsSetUsbDeviceDescriptor(UsbDeviceSpeed_Full, &devDesc);
+    if (R_FAILED(rc)) { mlog(std::string("devDescFS ERR ") + rcStr(rc)); teardown(); return false; }
 
-    // ── PASO 5: Interface descriptor (clase 6 = Image / PTP-MTP) ─────────────
+    devDesc.bcdUSB = 0x0200;
+    rc = usbDsSetUsbDeviceDescriptor(UsbDeviceSpeed_High, &devDesc);
+    if (R_FAILED(rc)) { mlog(std::string("devDescHS ERR ") + rcStr(rc)); teardown(); return false; }
+
+    devDesc.bcdUSB = 0x0300;
+    devDesc.bMaxPacketSize0 = 0x09;
+    rc = usbDsSetUsbDeviceDescriptor(UsbDeviceSpeed_Super, &devDesc);
+    if (R_FAILED(rc)) { mlog(std::string("devDescSS ERR ") + rcStr(rc)); teardown(); return false; }
+
+    // Binary Object Store (BOS)
+    u8 bos[0x16] = {
+        0x05, USB_DT_BOS, 0x16, 0x00, 0x02,
+        0x07, USB_DT_DEVICE_CAPABILITY, 0x02, 0x02, 0x00, 0x00, 0x00,
+        0x0A, USB_DT_DEVICE_CAPABILITY, 0x03, 0x00, 0x0E, 0x00, 0x03, 0x00, 0x00, 0x00
+    };
+    rc = usbDsSetBinaryObjectStore(bos, sizeof(bos));
+    if (R_FAILED(rc)) { mlog(std::string("bos ERR ") + rcStr(rc)); teardown(); return false; }
+
+    // Registrar Interfaz (Modo 5.0.0+)
+    rc = usbDsRegisterInterface(&g_iface);
+    if (R_FAILED(rc)) { mlog(std::string("regIface ERR ") + rcStr(rc)); teardown(); return false; }
+
+    // Configurar Descriptor de Interfaz MTP (Clase 6: Imagen, Subclase 1: Still, Protocolo 1: PIMA 15470 MTP)
     struct usb_interface_descriptor ifDesc;
     memset(&ifDesc, 0, sizeof(ifDesc));
     ifDesc.bLength            = USB_DT_INTERFACE_SIZE;
     ifDesc.bDescriptorType    = USB_DT_INTERFACE;
-    ifDesc.bInterfaceNumber   = USBDS_DEFAULT_InterfaceNumber;
+    ifDesc.bInterfaceNumber   = g_iface->interface_index;
     ifDesc.bAlternateSetting  = 0;
     ifDesc.bNumEndpoints      = 3;
-    ifDesc.bInterfaceClass    = 6;   // Image
-    ifDesc.bInterfaceSubClass = 1;   // Still Image Capture
-    ifDesc.bInterfaceProtocol = 1;   // PIMA 15470 (MTP/PTP)
+    ifDesc.bInterfaceClass    = 0x06; // Still Image Capture / MTP
+    ifDesc.bInterfaceSubClass = 0x01;
+    ifDesc.bInterfaceProtocol = 0x01;
     ifDesc.iInterface         = 0;
 
-    if (R_FAILED(rc = usbDsGetDsInterface(&g_iface, &ifDesc, "EzFiles-MTP"))) {
-        mlog(std::string("MTP iface ERR ") + rcStr(rc)); teardown(); return false;
-    }
-    mlog("MTP interface registered");
+    // Descriptores de Endpoints:
+    // Bulk IN  = 0x80 | (interface_index + 1) -> ej 0x81
+    // Bulk OUT = 0x00 | (interface_index + 1) -> ej 0x01
+    // Intr IN  = 0x80 | (interface_index + 2) -> ej 0x82
+    u8 epInAddr   = (u8)(USB_ENDPOINT_IN  + g_iface->interface_index + 1);
+    u8 epOutAddr  = (u8)(USB_ENDPOINT_OUT + g_iface->interface_index + 1);
+    u8 epIntrAddr = (u8)(USB_ENDPOINT_IN  + g_iface->interface_index + 2);
 
-    // ── PASO 6: Endpoints ────────────────────────────────────────────────────
-    // Bulk OUT (host → device, para recibir comandos)
-    struct usb_endpoint_descriptor epBulkOut;
-    memset(&epBulkOut, 0, sizeof(epBulkOut));
-    epBulkOut.bLength          = USB_DT_ENDPOINT_SIZE;
-    epBulkOut.bDescriptorType  = USB_DT_ENDPOINT;
-    epBulkOut.bEndpointAddress = USB_ENDPOINT_OUT;
-    epBulkOut.bmAttributes     = USB_TRANSFER_TYPE_BULK;
-    epBulkOut.wMaxPacketSize   = 512;
+    struct usb_endpoint_descriptor ep_in;
+    memset(&ep_in, 0, sizeof(ep_in));
+    ep_in.bLength          = USB_DT_ENDPOINT_SIZE;
+    ep_in.bDescriptorType  = USB_DT_ENDPOINT;
+    ep_in.bEndpointAddress = epInAddr;
+    ep_in.bmAttributes     = USB_TRANSFER_TYPE_BULK;
+    ep_in.wMaxPacketSize   = 0x40;
 
-    // Bulk IN (device → host, para enviar datos/respuestas)
-    struct usb_endpoint_descriptor epBulkIn;
-    memset(&epBulkIn, 0, sizeof(epBulkIn));
-    epBulkIn.bLength           = USB_DT_ENDPOINT_SIZE;
-    epBulkIn.bDescriptorType   = USB_DT_ENDPOINT;
-    epBulkIn.bEndpointAddress  = USB_ENDPOINT_IN;
-    epBulkIn.bmAttributes      = USB_TRANSFER_TYPE_BULK;
-    epBulkIn.wMaxPacketSize    = 512;
+    struct usb_endpoint_descriptor ep_out;
+    memset(&ep_out, 0, sizeof(ep_out));
+    ep_out.bLength          = USB_DT_ENDPOINT_SIZE;
+    ep_out.bDescriptorType  = USB_DT_ENDPOINT;
+    ep_out.bEndpointAddress = epOutAddr;
+    ep_out.bmAttributes     = USB_TRANSFER_TYPE_BULK;
+    ep_out.wMaxPacketSize   = 0x40;
 
-    // Interrupt IN (device → host, para eventos asíncronos MTP)
-    struct usb_endpoint_descriptor epIntr;
-    memset(&epIntr, 0, sizeof(epIntr));
-    epIntr.bLength             = USB_DT_ENDPOINT_SIZE;
-    epIntr.bDescriptorType     = USB_DT_ENDPOINT;
-    epIntr.bEndpointAddress    = USB_ENDPOINT_IN;
-    epIntr.bmAttributes        = USB_TRANSFER_TYPE_INTERRUPT;
-    epIntr.wMaxPacketSize      = 28;
-    epIntr.bInterval           = 4;
+    struct usb_endpoint_descriptor ep_intr;
+    memset(&ep_intr, 0, sizeof(ep_intr));
+    ep_intr.bLength          = USB_DT_ENDPOINT_SIZE;
+    ep_intr.bDescriptorType  = USB_DT_ENDPOINT;
+    ep_intr.bEndpointAddress = epIntrAddr;
+    ep_intr.bmAttributes     = USB_TRANSFER_TYPE_INTERRUPT;
+    ep_intr.wMaxPacketSize   = 0x1C;
+    ep_intr.bInterval        = 0x04;
 
-    if (R_FAILED(rc = usbDsInterface_GetDsEndpoint(g_iface, &g_epBulkOut, &epBulkOut))) { mlog(std::string("MTP epOUT ERR ")  + rcStr(rc)); teardown(); return false; }
-    if (R_FAILED(rc = usbDsInterface_GetDsEndpoint(g_iface, &g_epBulkIn,  &epBulkIn)))  { mlog(std::string("MTP epIN ERR ")   + rcStr(rc)); teardown(); return false; }
-    if (R_FAILED(rc = usbDsInterface_GetDsEndpoint(g_iface, &g_epIntrIn,  &epIntr)))    { mlog(std::string("MTP epINTR ERR ") + rcStr(rc)); teardown(); return false; }
-    mlog("MTP endpoints OK");
+    struct usb_ss_endpoint_companion_descriptor ep_comp;
+    memset(&ep_comp, 0, sizeof(ep_comp));
+    ep_comp.bLength           = sizeof(ep_comp);
+    ep_comp.bDescriptorType   = USB_DT_SS_ENDPOINT_COMPANION;
+    ep_comp.bMaxBurst         = 0x0F;
+    ep_comp.bmAttributes      = 0x00;
+    ep_comp.wBytesPerInterval = 0x00;
 
-    // ── PASO 7: Configuration data (raw blob para cada velocidad) ────────────
-    // Config descriptor + Interface descriptor + 3 Endpoint descriptors
-    u8 blob[] = {
-        // Configuration descriptor (9 bytes)
-        0x09, 0x02, 0x27, 0x00, 0x01, 0x01, 0x00, 0x80, 0x32,
-        // Interface descriptor (9 bytes)
-        0x09, 0x04, 0x00, 0x00, 0x03, 0x06, 0x01, 0x01, 0x00,
-        // Endpoint Bulk OUT (7 bytes)
-        0x07, 0x05, 0x02, 0x02, 0x00, 0x02, 0x00,
-        // Endpoint Bulk IN  (7 bytes)
-        0x07, 0x05, 0x81, 0x02, 0x00, 0x02, 0x00,
-        // Endpoint Interrupt IN (7 bytes)
-        0x07, 0x05, 0x83, 0x03, 0x1C, 0x00, 0x04
-    };
-    size_t blobLen = sizeof(blob);
+    // 1. Config Full Speed (USB 1.1)
+    rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_Full, &ifDesc, USB_DT_INTERFACE_SIZE);
+    if (R_FAILED(rc)) { mlog(std::string("cfgFS_if ERR ") + rcStr(rc)); teardown(); return false; }
+    rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_Full, &ep_in, USB_DT_ENDPOINT_SIZE);
+    if (R_FAILED(rc)) { mlog(std::string("cfgFS_in ERR ") + rcStr(rc)); teardown(); return false; }
+    rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_Full, &ep_out, USB_DT_ENDPOINT_SIZE);
+    if (R_FAILED(rc)) { mlog(std::string("cfgFS_out ERR ") + rcStr(rc)); teardown(); return false; }
+    rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_Full, &ep_intr, USB_DT_ENDPOINT_SIZE);
+    if (R_FAILED(rc)) { mlog(std::string("cfgFS_intr ERR ") + rcStr(rc)); teardown(); return false; }
 
-    if (R_FAILED(rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_Full, blob, blobLen))) {
-        mlog(std::string("MTP cfgFS ERR ") + rcStr(rc)); teardown(); return false;
-    }
-    if (R_FAILED(rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_High, blob, blobLen))) {
-        mlog(std::string("MTP cfgHS ERR ") + rcStr(rc)); teardown(); return false;
-    }
+    // 2. Config High Speed (USB 2.0)
+    ep_in.wMaxPacketSize   = 0x200;
+    ep_out.wMaxPacketSize  = 0x200;
+    ep_intr.wMaxPacketSize = 0x40;
+    rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_High, &ifDesc, USB_DT_INTERFACE_SIZE);
+    if (R_FAILED(rc)) { mlog(std::string("cfgHS_if ERR ") + rcStr(rc)); teardown(); return false; }
+    rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_High, &ep_in, USB_DT_ENDPOINT_SIZE);
+    if (R_FAILED(rc)) { mlog(std::string("cfgHS_in ERR ") + rcStr(rc)); teardown(); return false; }
+    rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_High, &ep_out, USB_DT_ENDPOINT_SIZE);
+    if (R_FAILED(rc)) { mlog(std::string("cfgHS_out ERR ") + rcStr(rc)); teardown(); return false; }
+    rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_High, &ep_intr, USB_DT_ENDPOINT_SIZE);
+    if (R_FAILED(rc)) { mlog(std::string("cfgHS_intr ERR ") + rcStr(rc)); teardown(); return false; }
 
-    // ── PASO 8: Enable (solo fw < 5.0; en fw >= 5.0 es automático) ───────────
-    if (hosversionBefore(5, 0, 0)) {
-        if (R_FAILED(rc = usbDsEnable())) {
-            mlog(std::string("MTP enable ERR ") + rcStr(rc)); teardown(); return false;
-        }
-        mlog("MTP usbDsEnable OK (fw < 5.0)");
-    } else {
-        mlog("MTP fw >= 5.0: enable automatico tras AppendConfigurationData");
-    }
+    // 3. Config Super Speed (USB 3.0)
+    ep_in.wMaxPacketSize   = 0x400;
+    ep_out.wMaxPacketSize  = 0x400;
+    rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_Super, &ifDesc, USB_DT_INTERFACE_SIZE);
+    if (R_FAILED(rc)) { mlog(std::string("cfgSS_if ERR ") + rcStr(rc)); teardown(); return false; }
+    rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_Super, &ep_in, USB_DT_ENDPOINT_SIZE);
+    if (R_FAILED(rc)) { mlog(std::string("cfgSS_in ERR ") + rcStr(rc)); teardown(); return false; }
+    rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_Super, &ep_comp, sizeof(ep_comp));
+    if (R_FAILED(rc)) { mlog(std::string("cfgSS_cin ERR ") + rcStr(rc)); teardown(); return false; }
+    rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_Super, &ep_out, USB_DT_ENDPOINT_SIZE);
+    if (R_FAILED(rc)) { mlog(std::string("cfgSS_out ERR ") + rcStr(rc)); teardown(); return false; }
+    rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_Super, &ep_comp, sizeof(ep_comp));
+    if (R_FAILED(rc)) { mlog(std::string("cfgSS_cout ERR ") + rcStr(rc)); teardown(); return false; }
+    rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_Super, &ep_intr, USB_DT_ENDPOINT_SIZE);
+    if (R_FAILED(rc)) { mlog(std::string("cfgSS_intr ERR ") + rcStr(rc)); teardown(); return false; }
+    rc = usbDsInterface_AppendConfigurationData(g_iface, UsbDeviceSpeed_Super, &ep_comp, sizeof(ep_comp));
+    if (R_FAILED(rc)) { mlog(std::string("cfgSS_cintr ERR ") + rcStr(rc)); teardown(); return false; }
+
+    // Registrar Endpoints
+    rc = usbDsInterface_RegisterEndpoint(g_iface, &g_epBulkIn, epInAddr);
+    if (R_FAILED(rc)) { mlog(std::string("regEpIn ERR ") + rcStr(rc)); teardown(); return false; }
+
+    rc = usbDsInterface_RegisterEndpoint(g_iface, &g_epBulkOut, epOutAddr);
+    if (R_FAILED(rc)) { mlog(std::string("regEpOut ERR ") + rcStr(rc)); teardown(); return false; }
+
+    rc = usbDsInterface_RegisterEndpoint(g_iface, &g_epIntrIn, epIntrAddr);
+    if (R_FAILED(rc)) { mlog(std::string("regEpIntr ERR ") + rcStr(rc)); teardown(); return false; }
+
+    // Habilitar Interfaz y USB Device
+    rc = usbDsInterface_EnableInterface(g_iface);
+    if (R_FAILED(rc)) { mlog(std::string("enIface ERR ") + rcStr(rc)); teardown(); return false; }
+
+    rc = usbDsEnable();
+    if (R_FAILED(rc)) { mlog(std::string("usbEn ERR ") + rcStr(rc)); teardown(); return false; }
 
     g_ready = true;
-    mlog("MTP listo. Conecta el cable USB-C al PC.");
-    mlog("Windows: 'Ver archivos del dispositivo'. macOS: Android File Transfer.");
+    mlog("MTP: USB inicializado OK (0x057E:0x201D)");
+    mlog("MTP: Listo para transferencias en PC");
     return true;
 }
 
-// Sondeo no-bloqueante: registra paquetes setup nuevos (diagnóstico).
 inline void poll() {
     if (!g_ready || !g_iface) return;
     u8 buf[32];

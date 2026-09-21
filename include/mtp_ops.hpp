@@ -287,7 +287,7 @@ inline bool sendFileData(u16 code, u32 tx, const std::string& path, u64 size) {
 inline void worker() {
     g_active = true;
     mtp_usb::mlog("MTP worker iniciado");
-    usbDsEndpoint_SetZlt(g_epIn, true);
+    // ZLT (Zero Length Termination) gestionado por el driver usb_mtp.c
     std::string pendingPath;
     bool hasPending = false;
 

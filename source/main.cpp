@@ -929,7 +929,7 @@ int main(int argc, char* argv[]) {
                 } else {
                     logcon::push("MTP iniciando conexion USB...");
                     if (mtp_usb::setup()) {
-                        mtp_ops::start(mtp_usb::g_epBulkIn, mtp_usb::g_epBulkOut);
+                        mtp_ops::start();
                         logcon::push("MTP servidor activo!");
                     } else {
                         logcon::push("MTP error al inicializar USB");

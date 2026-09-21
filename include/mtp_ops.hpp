@@ -184,73 +184,25 @@ inline const MtpObj* mtpFind(u32 h) {
     return nullptr;
 }
 
-// --- Buffer alineado a 0x1000 (4KB) requerido estrictamente por libnx PostBufferAsync ---
-inline u8* getAlignedIoBuffer() {
-    static u8* s_buf = nullptr;
-    if (!s_buf) {
-        s_buf = (u8*)memalign(0x1000, 65536);
-        if (s_buf) memset(s_buf, 0, 65536);
-    }
-    return s_buf;
+// --- Bulk I/O delegadas al driver de hardware usbMtpTransfer ---
+inline bool epXfer(UsbDsEndpoint* /*ep*/, u8* buf, size_t len, bool isWrite, size_t* doneOut) {
+    if (!g_run) return false;
+    size_t transferred = usbMtpTransfer(isWrite ? MTP_EP_BULK_IN : MTP_EP_BULK_OUT, isWrite ? 1 : 0, buf, len, 5000000000ULL);
+    if (doneOut) *doneOut = transferred;
+    return transferred == len;
 }
 
-// --- Bulk I/O (CompletionEvent + urbId, con timeout y parada) ---
-inline bool epXfer(UsbDsEndpoint* ep, u8* buf, size_t len, bool isWrite, size_t* doneOut) {
-    u8* ioBuf = getAlignedIoBuffer();
-    if (!ioBuf) return false;
+inline bool epWrite(UsbDsEndpoint* /*ep*/, const u8* data, size_t len) {
+    if (!g_run) return false;
+    size_t transferred = usbMtpTransfer(MTP_EP_BULK_IN, 1, (void*)data, len, 5000000000ULL);
+    return transferred == len;
+}
 
-    size_t off = 0;
-    while (off < len) {
-        if (!g_run) return false;
-        size_t chunk = (len - off > 65536) ? 65536 : (len - off);
-        if (isWrite) {
-            memcpy(ioBuf, buf + off, chunk);
-        }
-        u32 urb = 0;
-        eventClear(&ep->CompletionEvent);
-        if (R_FAILED(usbDsEndpoint_PostBufferAsync(ep, ioBuf, chunk, &urb))) return false;
-        if (R_FAILED(eventWait(&ep->CompletionEvent, 5000000000ULL))) { usbDsEndpoint_Cancel(ep); return false; }
-        UsbDsReportData rep;
-        memset(&rep, 0, sizeof(rep));
-        if (R_FAILED(usbDsEndpoint_GetReportData(ep, &rep))) return false;
-        u32 req = 0, done = 0;
-        if (R_FAILED(usbDsParseReportData(&rep, urb, &req, &done)) || done == 0) return false;
-        if (!isWrite) {
-            memcpy(buf + off, ioBuf, done);
-        }
-        off += done;
-        if (doneOut) *doneOut = off;
-        if (!isWrite && done < chunk) break; // short packet = fin de fase
-    }
-    return off == len;
-}
-inline bool epWrite(UsbDsEndpoint* ep, const u8* data, size_t len) {
-    std::vector<u8> tmp(data, data + len);
-    return epXfer(ep, tmp.data(), len, true, nullptr);
-}
 // Lee exactamente len bytes (fase comando/parámetros). false = parar o error.
-inline bool epReadExact(UsbDsEndpoint* ep, u8* buf, size_t len) {
-    u8* ioBuf = getAlignedIoBuffer();
-    if (!ioBuf) return false;
-
-    size_t off = 0;
-    while (off < len) {
-        if (!g_run) return false;
-        size_t chunk = (len - off > 65536) ? 65536 : (len - off);
-        u32 urb = 0;
-        eventClear(&ep->CompletionEvent);
-        if (R_FAILED(usbDsEndpoint_PostBufferAsync(ep, ioBuf, chunk, &urb))) return false;
-        Result wr = eventWait(&ep->CompletionEvent, 500000000ULL);
-        if (R_FAILED(wr)) continue; // slice de espera: re-chequea g_run
-        UsbDsReportData rep;
-        memset(&rep, 0, sizeof(rep));
-        if (R_FAILED(usbDsEndpoint_GetReportData(ep, &rep))) return false;
-        u32 req = 0, done = 0;
-        if (R_FAILED(usbDsParseReportData(&rep, urb, &req, &done)) || done == 0) return false;
-        memcpy(buf + off, ioBuf, done);
-        off += done;
-    }
-    return true;
+inline bool epReadExact(UsbDsEndpoint* /*ep*/, u8* buf, size_t len) {
+    if (!g_run) return false;
+    size_t transferred = usbMtpTransfer(MTP_EP_BULK_OUT, 0, buf, len, 500000000ULL);
+    return transferred == len;
 }
 
 // --- Constructores de datasets ---
@@ -495,10 +447,9 @@ inline void worker() {
 
 inline bool running() { return g_active; }
 
-inline bool start(UsbDsEndpoint* epIn, UsbDsEndpoint* epOut) {
+inline bool start(UsbDsEndpoint* epIn = nullptr, UsbDsEndpoint* epOut = nullptr) {
+    (void)epIn; (void)epOut;
     if (g_active) return true;
-    if (!epIn || !epOut) { mtp_usb::mlog("MTP worker ERR sin endpoints"); return false; }
-    g_epIn = epIn; g_epOut = epOut;
     g_run = true;
     g_thr = std::thread(worker);
     return true;
@@ -507,8 +458,6 @@ inline bool start(UsbDsEndpoint* epIn, UsbDsEndpoint* epOut) {
 inline void stop() {
     if (!g_active) return;
     g_run = false;
-    if (g_epIn) usbDsEndpoint_Cancel(g_epIn);
-    if (g_epOut) usbDsEndpoint_Cancel(g_epOut);
     if (g_thr.joinable()) g_thr.join();
 }
 

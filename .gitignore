@@ -1,0 +1,19 @@
+# Build output (devkitPro)
+build/
+*.o
+*.d
+*.elf
+*.nro
+*.nacp
+*.map
+*.lst
+
+# Deploy / staging temporales
+staging_deploy/
+staging_safe/
+temp_*/
+
+# OS / editores
+Thumbs.db
+.DS_Store
+*.user

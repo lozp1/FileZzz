@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>EzFiles · Andromeda Suite (PC Interactive Simulator)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+    body {
+      background: #060913;
+      color: #F8FAFC;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    #screen-container {
+      width: 1280px;
+      height: 720px;
+      background: #0B1120;
+      border: 2px solid #1E293B;
+      border-radius: 16px;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8), 0 0 40px rgba(56, 189, 248, 0.15);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    /* Controls Bar */
+    #top-bar {
+      height: 76px;
+      background: #060913;
+      border-bottom: 1px solid #1E293B;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .logo-squircle {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      border: 1px solid #38BDF8;
+      background: #0E1526;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 15px rgba(56, 189, 248, 0.3);
+      overflow: hidden;
+    }
+    .logo-squircle img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .header-titles h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #F8FAFC;
+      letter-spacing: -0.3px;
+    }
+    .header-titles span {
+      font-size: 13px;
+      font-weight: 500;
+      color: #10E761;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .lang-badge {
+      background: #0E1526;
+      border: 1px solid #38BDF8;
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #38BDF8;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .lang-badge:hover {
+      background: #1D4ED8;
+      color: #FFF;
+    }
+
+    /* Screen Views */
+    .screen-view {
+      flex: 1;
+      display: none;
+      flex-direction: column;
+      position: relative;
+    }
+    .screen-view.active {
+      display: flex;
+    }
+
+    /* 1. Splash */
+    #view-splash {
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at center, rgba(56, 189, 248, 0.1) 0%, #0B1120 70%);
+    }
+    .splash-card {
+      width: 200px;
+      height: 200px;
+      border-radius: 24px;
+      border: 2px solid #38BDF8;
+      background: #0E1526;
+      box-shadow: 0 0 35px rgba(56, 189, 248, 0.35);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: floatPulse 3s ease-in-out infinite;
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+    .splash-card img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    @keyframes floatPulse {
+      0%, 100% { transform: translateY(0) scale(1); box-shadow: 0 0 30px rgba(56, 189, 248, 0.3); }
+      50% { transform: translateY(-8px) scale(1.02); box-shadow: 0 0 50px rgba(56, 189, 248, 0.5); }
+    }
+    .splash-progress-bar {
+      width: 440px;
+      height: 8px;
+      background: #1E293B;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 30px;
+    }
+    .splash-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #3B82F6, #38BDF8);
+      border-radius: 4px;
+      transition: width 0.05s linear;
+    }
+
+    /* 2. Dashboard */
+    #view-dashboard {
+      padding: 24px 60px;
+    }
+    .dash-header {
+      margin-bottom: 18px;
+    }
+    .dash-header h2 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #F8FAFC;
+    }
+    .dash-header p {
+      font-size: 13px;
+      color: #94A3B8;
+      margin-top: 4px;
+    }
+    .menu-cards {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .menu-card {
+      height: 74px;
+      background: #060913;
+      border: 1px solid #1E293B;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
+      overflow: hidden;
+    }
+    .menu-card::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 10px;
+      bottom: 10px;
+      width: 5px;
+      border-radius: 3px;
+      background: transparent;
+      transition: background 0.2s;
+    }
+    .menu-card.selected, .menu-card:hover {
+      background: #0E1526;
+      border-color: #38BDF8;
+      box-shadow: 0 8px 25px rgba(56, 189, 248, 0.15);
+      transform: translateX(6px);
+    }
+    .menu-card.selected::before, .menu-card:hover::before {
+      background: var(--accent);
+    }
+    .card-icon {
+      width: 48px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-right: 18px;
+    }
+    .card-icon img {
+      width: 44px;
+      height: 44px;
+    }
+    .card-info {
+      flex: 1;
+    }
+    .card-info h3 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #F8FAFC;
+    }
+    .card-info p {
+      font-size: 13px;
+      color: #94A3B8;
+      margin-top: 2px;
+    }
+    .card-badge {
+      background: #0B1120;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    /* 3. Explorer */
+    #view-explorer {
+      padding: 0;
+    }
+    .exp-subbar {
+      height: 52px;
+      background: #060913;
+      border-bottom: 1px solid #1E293B;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 32px;
+    }
+    .exp-path {
+      font-size: 15px;
+      font-weight: 600;
+      color: #38BDF8;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .exp-clipboard {
+      background: #0E1526;
+      border: 1px solid #F59E0B;
+      color: #F59E0B;
+      padding: 4px 14px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .file-list {
+      flex: 1;
+      padding: 16px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      overflow-y: auto;
+    }
+    .file-row {
+      height: 54px;
+      background: #060913;
+      border: 1px solid #1E293B;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .file-row:hover, .file-row.selected {
+      background: #0E1526;
+      border-color: #38BDF8;
+      box-shadow: 0 4px 15px rgba(56, 189, 248, 0.12);
+    }
+    .file-icon {
+      width: 34px;
+      height: 34px;
+      margin-right: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .file-icon img {
+      width: 32px;
+      height: 32px;
+    }
+    .file-details {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .file-name {
+      font-size: 16px;
+      font-weight: 600;
+      color: #FFFFFF; /* Pure White font requested */
+    }
+    .file-meta {
+      font-size: 13px;
+      font-weight: 500;
+      color: #94A3B8;
+      display: flex;
+      gap: 20px;
+    }
+
+    /* 4. Language Selector Screen */
+    #view-lang {
+      padding: 24px 60px;
+      align-items: center;
+    }
+    .lang-list {
+      width: 680px;
+      max-height: 480px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 20px;
+      padding-right: 8px;
+    }
+    .lang-item {
+      height: 52px;
+      background: #060913;
+      border: 1px solid #1E293B;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .lang-item:hover, .lang-item.active-lang {
+      background: #0E1526;
+      border-color: #38BDF8;
+    }
+    .lang-badge-active {
+      background: rgba(16, 231, 97, 0.15);
+      border: 1px solid #10E761;
+      color: #10E761;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 12px;
+      border-radius: 12px;
+    }
+
+    /* 5. About Screen */
+    #view-about {
+      padding: 30px 60px;
+      align-items: center;
+    }
+    .about-card {
+      width: 860px;
+      background: #060913;
+      border: 1px solid #38BDF8; /* Sleek cyan border requested, orange removed */
+      border-radius: 20px;
+      padding: 36px 44px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6), 0 0 25px rgba(56, 189, 248, 0.1);
+    }
+    .about-header {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      margin-bottom: 28px;
+    }
+    .about-logo {
+      width: 84px;
+      height: 84px;
+      border-radius: 20px;
+      border: 2px solid #38BDF8;
+      overflow: hidden;
+    }
+    .about-logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .about-field {
+      display: flex;
+      margin-bottom: 14px;
+      font-size: 15px;
+    }
+    .about-label {
+      width: 220px;
+      color: #64748B;
+      font-weight: 600;
+    }
+    .about-val {
+      color: #F8FAFC;
+      font-weight: 500;
+    }
+
+    /* Bottom Bar */
+    #bottom-bar {
+      height: 54px;
+      background: #060913;
+      border-top: 1px solid #1E293B;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+      font-size: 13px;
+      color: #94A3B8;
+    }
+    .shortcuts {
+      display: flex;
+      gap: 18px;
+    }
+    .key-hint {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+    .key-btn {
+      background: #0E1526;
+      border: 1px solid #38BDF8;
+      color: #38BDF8;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 11px;
+    }
+
+    /* Modal dialogs */
+    .modal-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .modal-overlay.active {
+      display: flex;
+    }
+    .modal-card {
+      width: 480px;
+      background: #060913;
+      border: 2px solid #38BDF8;
+      border-radius: 18px;
+      padding: 28px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.9);
+    }
+    .modal-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 18px;
+      text-align: center;
+    }
+    .modal-opt {
+      padding: 12px 18px;
+      background: #0B1120;
+      border: 1px solid #1E293B;
+      border-radius: 10px;
+      margin-bottom: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .modal-opt:hover {
+      background: #0E1526;
+      border-color: #38BDF8;
+      color: #FFF;
+    }
+    .modal-opt.danger {
+      color: #EF4444;
+      border-color: rgba(239, 68, 68, 0.4);
+    }
+    .modal-opt.danger:hover {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: #EF4444;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="screen-container">
+    <!-- Top Header -->
+    <div id="top-bar">
+      <div class="header-left">
+        <div class="logo-squircle">
+          <img src="ezfiles_logo.jpg" alt="EzFiles">
+        </div>
+        <div class="header-titles">
+          <h1 id="hdr-app-title">EZ FILES · ANDROMEDA</h1>
+          <span id="hdr-status">● SISTEMA ACTIVO</span>
+        </div>
+      </div>
+      <div class="lang-badge" onclick="openLanguageScreen()" id="hdr-lang-btn">
+        🌐 [ES] Español
+      </div>
+    </div>
+
+    <!-- 1. Screen Splash -->
+    <div id="view-splash" class="screen-view active" onclick="dismissSplash()">
+      <div class="splash-card">
+        <img src="ezfiles_logo.jpg" alt="EzFiles">
+      </div>
+      <h2 style="font-size: 28px; font-weight: 800; color: #F8FAFC;">EZ FILES</h2>
+      <p style="font-size: 15px; font-weight: 600; color: #38BDF8; margin-top: 6px;">HIGH-SPEED STORAGE & FILE SUITE</p>
+      <div class="splash-progress-bar">
+        <div class="splash-progress-fill" id="splash-fill"></div>
+      </div>
+      <p style="font-size: 13px; color: #64748B; margin-top: 14px;" id="splash-status-text">Iniciando sistema Andromeda Zero-Copy...</p>
+      <p style="font-size: 13px; color: #94A3B8; margin-top: 30px;">Presiona [A] o haz clic para continuar</p>
+    </div>
+
+    <!-- 2. Screen Dashboard -->
+    <div id="view-dashboard" class="screen-view">
+      <div class="dash-header">
+        <h2 id="dash-title">CENTRO DE GESTIÓN Y ALMACENAMIENTO</h2>
+        <p id="dash-sub">Exploración de alta velocidad, transferencia USB MTP y red local</p>
+      </div>
+      <div class="menu-cards">
+        <div class="menu-card selected" style="--accent: #38BDF8;" onclick="openExplorer()">
+          <div class="card-icon"><img src="icon_explorer.png"></div>
+          <div class="card-info">
+            <h3 id="card-t-exp">Explorador MicroSD</h3>
+            <p id="card-s-exp">Navega por tu tarjeta SD, gestiona archivos y carpetas</p>
+          </div>
+          <div class="card-badge" style="border-color: #38BDF8; color: #38BDF8;">[X] o [A]</div>
+        </div>
+
+        <div class="menu-card" style="--accent: #10E761;" onclick="openUsb()">
+          <div class="card-icon"><img src="icon_usb.png"></div>
+          <div class="card-info">
+            <h3 id="card-t-usb">Conexión USB (MTP)</h3>
+            <p id="card-s-usb">Transferencia directa de alta velocidad con PC o Mac</p>
+          </div>
+          <div class="card-badge" style="border-color: #10E761; color: #10E761;">[Y]</div>
+        </div>
+
+        <div class="menu-card" style="--accent: #A855F7;" onclick="openFtp()">
+          <div class="card-icon"><img src="icon_ftp.png"></div>
+          <div class="card-info">
+            <h3 id="card-t-ftp">Servidor FTP / Red</h3>
+            <p id="card-s-ftp">Acceso inalámbrico por red local sin cables</p>
+          </div>
+          <div class="card-badge" style="border-color: #A855F7; color: #A855F7;">[+]</div>
+        </div>
+
+        <div class="menu-card" style="--accent: #3B82F6;" onclick="openLanguageScreen()">
+          <div class="card-icon"><img src="icon_lang.png"></div>
+          <div class="card-info">
+            <h3 id="card-t-lang">Idioma del Sistema</h3>
+            <p id="card-s-lang">Configura el idioma oficial de toda la aplicación</p>
+          </div>
+          <div class="card-badge" style="border-color: #3B82F6; color: #3B82F6;">[R]</div>
+        </div>
+
+        <div class="menu-card" style="--accent: #38BDF8;" onclick="openAbout()">
+          <div class="card-icon"><img src="icon_about.png"></div>
+          <div class="card-info">
+            <h3 id="card-t-about">Acerca de Ez Files</h3>
+            <p id="card-s-about">Información del desarrollador, versión y sistema</p>
+          </div>
+          <div class="card-badge" style="border-color: #38BDF8; color: #38BDF8;">[-]</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Screen Explorer -->
+    <div id="view-explorer" class="screen-view">
+      <div class="exp-subbar">
+        <div class="exp-path">
+          <button class="key-btn" onclick="goBack()" style="cursor: pointer;">← [B] Volver</button>
+          <span id="exp-current-path">sdmc:/switch/</span>
+          <span style="font-size: 13px; color: #64748B;" id="exp-count">(14 elementos)</span>
+        </div>
+        <div id="exp-clipboard-badge" class="exp-clipboard" style="display: none;" onclick="pasteItem()">
+          📋 [Y] Pegar aquí
+        </div>
+      </div>
+
+      <div class="file-list" id="file-list-container">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+
+    <!-- 4. Screen Language Selector -->
+    <div id="view-lang" class="screen-view">
+      <h2 style="font-size: 22px; font-weight: 700; margin-bottom: 6px;">SELECCIONA EL IDIOMA DEL SISTEMA</h2>
+      <p style="font-size: 14px; color: #94A3B8;">El cambio se aplica inmediatamente a todas las pantallas.</p>
+      <div class="lang-list" id="lang-list-container">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+
+    <!-- 5. Screen About -->
+    <div id="view-about" class="screen-view">
+      <div class="about-card">
+        <div class="about-header">
+          <div class="about-logo">
+            <img src="ezfiles_logo.jpg" alt="EzFiles">
+          </div>
+          <div>
+            <h2 style="font-size: 22px; font-weight: 800; color: #F8FAFC;">EZ FILES · ANDROMEDA SUITE</h2>
+            <p style="font-size: 14px; font-weight: 600; color: #38BDF8; margin-top: 4px;">Versión 1.0.0 Oficial · Motor Zero-Copy Nativo</p>
+          </div>
+        </div>
+        <hr style="border: 0; border-top: 1px solid #1E293B; margin-bottom: 24px;">
+        <div class="about-field">
+          <div class="about-label">DESARROLLADO POR:</div>
+          <div class="about-val">Franco Paolo López Gálvez</div>
+        </div>
+        <div class="about-field">
+          <div class="about-label">CORREO PERSONAL:</div>
+          <div class="about-val" style="color: #38BDF8;">francopaolo_lg@outlook.com</div>
+        </div>
+        <div class="about-field">
+          <div class="about-label">PÁGINA GITHUB:</div>
+          <div class="about-val" style="color: #10E761;">https://github.com/lozp1</div>
+        </div>
+        <div class="about-field">
+          <div class="about-label">SISTEMA OPERATIVO:</div>
+          <div class="about-val" style="color: #94A3B8;">Horizon OS 22.5.0 | Atmosphere 1.11.2</div>
+        </div>
+        <div style="margin-top: 32px; text-align: center;">
+          <button class="key-btn" onclick="goBack()" style="font-size: 13px; padding: 8px 24px; cursor: pointer;">
+            Presiona [A] o haz clic para volver
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Bar -->
+    <div id="bottom-bar">
+      <div class="shortcuts">
+        <span class="key-hint" onclick="goBack()"><span class="key-btn">B</span> Volver</span>
+        <span class="key-hint" onclick="triggerAction('A')"><span class="key-btn">A</span> Seleccionar</span>
+        <span class="key-hint" onclick="triggerAction('+')"><span class="key-btn">+</span> Menú de archivo</span>
+      </div>
+      <div>Simulador Oficial EzFiles · Andromeda Suite</div>
+    </div>
+
+    <!-- Modal Contextual -->
+    <div class="modal-overlay" id="modal-context" onclick="closeModal(event, 'modal-context')">
+      <div class="modal-card">
+        <div class="modal-title">ACCIONES DE ARCHIVO</div>
+        <div class="modal-opt" onclick="copySelectedItem()">📄 Copiar elemento</div>
+        <div class="modal-opt" onclick="cutSelectedItem()">✂️ Cortar elemento</div>
+        <div class="modal-opt" onclick="pasteItem()">📋 Pegar elemento aquí</div>
+        <div class="modal-opt danger" onclick="openDeleteModal()">🗑️ Eliminar elemento</div>
+        <div class="modal-opt" onclick="openPropsModal()">ℹ️ Propiedades</div>
+        <div class="modal-opt" onclick="closeModalDirect('modal-context')">Cerrar</div>
+      </div>
+    </div>
+
+    <!-- Modal Delete Confirm -->
+    <div class="modal-overlay" id="modal-delete">
+      <div class="modal-card" style="border-color: #EF4444;">
+        <div class="modal-title" style="color: #EF4444;">CONFIRMAR ELIMINACIÓN</div>
+        <p style="text-align: center; font-size: 14px; margin-bottom: 20px;">¿Estás seguro de eliminar permanentemente este archivo?</p>
+        <div style="display: flex; gap: 12px;">
+          <div class="modal-opt danger" style="flex: 1; text-align: center;" onclick="confirmDelete()">[A] Eliminar</div>
+          <div class="modal-opt" style="flex: 1; text-align: center;" onclick="closeModalDirect('modal-delete')">[B] Cancelar</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Properties -->
+    <div class="modal-overlay" id="modal-props" onclick="closeModal(event, 'modal-props')">
+      <div class="modal-card">
+        <div class="modal-title">PROPIEDADES DEL ARCHIVO</div>
+        <div style="font-size: 14px; line-height: 2;">
+          <div><strong style="color: #64748B;">Nombre:</strong> <span id="prop-name" style="color: #38BDF8;">archivo.nsp</span></div>
+          <div><strong style="color: #64748B;">Ruta:</strong> <span id="prop-path" style="color: #94A3B8;">sdmc:/switch/</span></div>
+          <div><strong style="color: #64748B;">Tamaño:</strong> <span id="prop-size" style="color: #10E761;">14.2 MB (14,892,120 bytes)</span></div>
+          <div><strong style="color: #64748B;">Modificado:</strong> <span id="prop-date">2026-09-20 21:45</span></div>
+        </div>
+        <div style="margin-top: 20px; text-align: center;">
+          <button class="key-btn" onclick="closeModalDirect('modal-props')" style="padding: 6px 20px;">[A] Cerrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Audio Synthesizer (Web Audio API matching sound.hpp)
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playSfx(type) {
+      if (!audioCtx) return;
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      const now = audioCtx.currentTime;
+
+      if (type === 'nav') {
+        osc.frequency.setValueAtTime(550, now);
+        osc.frequency.exponentialRampToValueAtTime(750, now + 0.04);
+        gain.gain.setValueAtTime(0.12, now);
+        gain.gain.linearRampToValueAtTime(0.001, now + 0.04);
+        osc.start(now); osc.stop(now + 0.04);
+      } else if (type === 'confirm') {
+        osc.frequency.setValueAtTime(523.25, now);
+        osc.frequency.setValueAtTime(659.25, now + 0.05);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.linearRampToValueAtTime(0.001, now + 0.12);
+        osc.start(now); osc.stop(now + 0.12);
+      } else if (type === 'back') {
+        osc.frequency.setValueAtTime(450, now);
+        osc.frequency.exponentialRampToValueAtTime(250, now + 0.08);
+        gain.gain.setValueAtTime(0.12, now);
+        gain.gain.linearRampToValueAtTime(0.001, now + 0.08);
+        osc.start(now); osc.stop(now + 0.08);
+      } else if (type === 'delete') {
+        osc.frequency.setValueAtTime(180, now);
+        gain.gain.setValueAtTime(0.20, now);
+        gain.gain.linearRampToValueAtTime(0.001, now + 0.15);
+        osc.start(now); osc.stop(now + 0.15);
+      }
+    }
+
+    // 16 Languages from Andromeda Downloader (Clean text badges, no emoji pause bars)
+    const LANGUAGES = [
+      { code: 'es', badge: '[ES]', name: 'Español' },
+      { code: 'en', badge: '[EN]', name: 'English' },
+      { code: 'pt', badge: '[PT]', name: 'Português' },
+      { code: 'qu', badge: '[QU]', name: 'Runasimi (Quechua)' },
+      { code: 'myn', badge: '[MYN]', name: "K'iche' (Maya)" },
+      { code: 'fr', badge: '[FR]', name: 'Français' },
+      { code: 'de', badge: '[DE]', name: 'Deutsch' },
+      { code: 'it', badge: '[IT]', name: 'Italiano' },
+      { code: 'ru', badge: '[RU]', name: 'Русский' },
+      { code: 'nl', badge: '[NL]', name: 'Nederlands' },
+      { code: 'tr', badge: '[TR]', name: 'Türkçe' }
+    ];
+    let currentLang = 'es';
+
+    // Mock Filesystem for testing
+    let fs = [
+      { name: 'games', isDir: true, size: 0, date: '2026-09-18 14:20' },
+      { name: 'atmosphere', isDir: true, size: 0, date: '2026-09-19 10:11' },
+      { name: 'retroarch', isDir: true, size: 0, date: '2026-09-15 08:30' },
+      { name: 'Pokemon_Emerald.gba', isDir: false, size: 16777216, date: '2026-09-20 20:15', ext: '.gba' },
+      { name: 'Super_Mario_Wonder.nsp', isDir: false, size: 3670016000, date: '2026-09-12 18:00', ext: '.nsp' },
+      { name: 'EzFiles.nro', isDir: false, size: 11225555, date: '2026-09-20 22:34', ext: '.nro' },
+      { name: 'save_data.sav', isDir: false, size: 131072, date: '2026-09-20 21:00', ext: '.sav' },
+      { name: 'config.ini', isDir: false, size: 4096, date: '2026-09-01 12:00', ext: '.ini' }
+    ];
+    let selectedFileIdx = 0;
+    let clipboard = null; // { item, op: 'copy'|'cut' }
+
+    // Navigation state
+    let history = ['view-splash'];
+
+    function showScreen(screenId) {
+      document.querySelectorAll('.screen-view').forEach(s => s.classList.remove('active'));
+      document.getElementById(screenId).classList.add('active');
+    }
+
+    function dismissSplash() {
+      playSfx('confirm');
+      history = ['view-dashboard'];
+      showScreen('view-dashboard');
+    }
+
+    function openExplorer() {
+      playSfx('confirm');
+      history.push('view-explorer');
+      showScreen('view-explorer');
+      renderFiles();
+    }
+
+    function openUsb() {
+      playSfx('confirm');
+      alert("Conexión USB: Conecta tu Nintendo Switch al PC con el cable USB-C para transferencia directa de archivos.");
+    }
+
+    function openFtp() {
+      playSfx('confirm');
+      alert("Servidor FTP Activo: ftp://192.168.1.150:5000\nEscribe esta dirección en tu Explorador de Windows.");
+    }
+
+    function openLanguageScreen() {
+      playSfx('confirm');
+      history.push('view-lang');
+      showScreen('view-lang');
+      renderLanguages();
+    }
+
+    function openAbout() {
+      playSfx('confirm');
+      history.push('view-about');
+      showScreen('view-about');
+    }
+
+    function goBack() {
+      playSfx('back');
+      if (history.length > 1) {
+        history.pop();
+        showScreen(history[history.length - 1]);
+      }
+    }
+
+    function triggerAction(key) {
+      const cur = history[history.length - 1];
+      if (cur === 'view-about' && (key === 'A' || key === 'B')) goBack();
+      else if (cur === 'view-explorer' && key === '+') openContextModal(selectedFileIdx);
+    }
+
+    function formatBytes(bytes) {
+      if (bytes === 0) return '--';
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024*1024) return (bytes / 1024).toFixed(1) + ' KB';
+      if (bytes < 1024*1024*1024) return (bytes / (1024*1024)).toFixed(2) + ' MB';
+      return (bytes / (1024*1024*1024)).toFixed(2) + ' GB';
+    }
+
+    function renderFiles() {
+      const container = document.getElementById('file-list-container');
+      container.innerHTML = '';
+      document.getElementById('exp-count').textContent = `(${fs.length} elementos)`;
+
+      fs.forEach((item, idx) => {
+        const row = document.createElement('div');
+        row.className = 'file-row' + (idx === selectedFileIdx ? ' selected' : '');
+
+        let ico = 'icon_file_sm.png';
+        if (item.isDir) ico = 'icon_folder_sm.png';
+        else if (item.ext === '.nsp') ico = 'icon_nsp_sm.png';
+        else if (item.ext === '.nro') ico = 'icon_nro_sm.png';
+        else if (item.ext === '.sav') ico = 'icon_sav_sm.png';
+
+        row.innerHTML = `
+          <div class="file-icon"><img src="${ico}"></div>
+          <div class="file-details">
+            <div class="file-name">${item.name}</div>
+            <div class="file-meta">
+              <span>${item.isDir ? '&lt;CARPETA&gt;' : formatBytes(item.size)}</span>
+              <span>${item.date}</span>
+            </div>
+          </div>
+        `;
+
+        row.onclick = () => {
+          selectedFileIdx = idx;
+          renderFiles();
+          playSfx('nav');
+          if (item.isDir) {
+            playSfx('confirm');
+          } else {
+            openContextModal(idx);
+          }
+        };
+
+        container.appendChild(row);
+      });
+    }
+
+    function renderLanguages() {
+      const container = document.getElementById('lang-list-container');
+      container.innerHTML = '';
+      LANGUAGES.forEach(l => {
+        const item = document.createElement('div');
+        const isActive = (l.code === currentLang);
+        item.className = 'lang-item' + (isActive ? ' active-lang' : '');
+        item.innerHTML = `
+          <div style="font-size: 16px; font-weight: 600; color: #FFF;">
+            <span style="color: #38BDF8; margin-right: 8px;">${l.badge}</span> ${l.name}
+          </div>
+          ${isActive ? '<div class="lang-badge-active">● ACTIVO</div>' : ''}
+        `;
+        item.onclick = () => {
+          currentLang = l.code;
+          playSfx('confirm');
+          document.getElementById('hdr-lang-btn').textContent = `🌐 ${l.badge} ${l.name}`;
+          renderLanguages();
+        };
+        container.appendChild(item);
+      });
+    }
+
+    // Modal Operations
+    function openContextModal(idx) {
+      selectedFileIdx = idx;
+      document.getElementById('modal-context').classList.add('active');
+      playSfx('confirm');
+    }
+    function closeModalDirect(id) {
+      document.getElementById(id).classList.remove('active');
+      playSfx('back');
+    }
+    function closeModal(e, id) {
+      if (e.target.id === id) closeModalDirect(id);
+    }
+
+    function copySelectedItem() {
+      const item = fs[selectedFileIdx];
+      clipboard = { item: { ...item }, op: 'copy' };
+      document.getElementById('exp-clipboard-badge').style.display = 'block';
+      document.getElementById('exp-clipboard-badge').textContent = `📋 [Y] Pegar: ${item.name}`;
+      closeModalDirect('modal-context');
+      playSfx('confirm');
+    }
+
+    function cutSelectedItem() {
+      const item = fs[selectedFileIdx];
+      clipboard = { item: { ...item }, op: 'cut', originalIdx: selectedFileIdx };
+      document.getElementById('exp-clipboard-badge').style.display = 'block';
+      document.getElementById('exp-clipboard-badge').textContent = `✂️ [Y] Mover: ${item.name}`;
+      closeModalDirect('modal-context');
+      playSfx('confirm');
+    }
+
+    function pasteItem() {
+      if (!clipboard) return;
+      if (clipboard.op === 'cut') {
+        fs.splice(clipboard.originalIdx, 1);
+      }
+      const newItem = { ...clipboard.item, name: 'Copia_' + clipboard.item.name };
+      fs.push(newItem);
+      clipboard = null;
+      document.getElementById('exp-clipboard-badge').style.display = 'none';
+      renderFiles();
+      playSfx('confirm');
+      closeModalDirect('modal-context');
+    }
+
+    function openDeleteModal() {
+      closeModalDirect('modal-context');
+      document.getElementById('modal-delete').classList.add('active');
+    }
+
+    function confirmDelete() {
+      fs.splice(selectedFileIdx, 1);
+      if (selectedFileIdx >= fs.length) selectedFileIdx = Math.max(0, fs.length - 1);
+      closeModalDirect('modal-delete');
+      renderFiles();
+      playSfx('delete');
+    }
+
+    function openPropsModal() {
+      closeModalDirect('modal-context');
+      const item = fs[selectedFileIdx];
+      document.getElementById('prop-name').textContent = item.name;
+      document.getElementById('prop-path').textContent = 'sdmc:/switch/' + item.name;
+      document.getElementById('prop-size').textContent = formatBytes(item.size);
+      document.getElementById('prop-date').textContent = item.date;
+      document.getElementById('modal-props').classList.add('active');
+    }
+
+    // Splash timer animation simulation
+    let splashProgress = 0;
+    const sInt = setInterval(() => {
+      splashProgress += 4;
+      document.getElementById('splash-fill').style.width = splashProgress + '%';
+      if (splashProgress >= 100) {
+        clearInterval(sInt);
+      }
+    }, 40);
+
+    // Keyboard bindings matching Nintendo Switch
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === 'a' || e.key === 'A') {
+        triggerAction('A');
+      } else if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'b' || e.key === 'B') {
+        goBack();
+      } else if (e.key === '+') {
+        triggerAction('+');
+      }
+    });
+  </script>
+</body>
+</html>

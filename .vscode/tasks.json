@@ -1,0 +1,49 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build EzFiles (make)",
+            "type": "shell",
+            "command": "C:\\devkitPro\\msys2\\usr\\bin\\bash.exe",
+            "args": [
+                "--login",
+                "-c",
+                "cd /c/Projects/c++/EzFiles && make"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": "$gcc",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Deploy EzFiles to Switch SD",
+            "type": "shell",
+            "command": "powershell.exe",
+            "args": [
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "C:\\Projects\\c++\\EzFiles\\deploy_switch.ps1"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Clean EzFiles (make clean)",
+            "type": "shell",
+            "command": "C:\\devkitPro\\msys2\\usr\\bin\\bash.exe",
+            "args": [
+                "--login",
+                "-c",
+                "cd /c/Projects/c++/EzFiles && make clean"
+            ],
+            "problemMatcher": "$gcc"
+        }
+    ]
+}

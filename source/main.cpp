@@ -404,7 +404,8 @@ int main(int argc, char* argv[]) {
     psmInitialize();
     nifmInitialize(NifmServiceType_User);
     socketInitializeDefault();
-    bool usbAvailable = R_SUCCEEDED(usbDsInitialize());
+    // usb:ds lo gestiona mtp_usb::setup()/teardown() internamente.
+    bool usbAvailable = true; // Confirmado cuando el usuario activa MTP
 
     ftp_server::g_logCb = [](const char* s) { logcon::push(s ? s : ""); };
     mtp_usb::g_logCb = [](const char* s) { logcon::push(s ? s : ""); };
@@ -414,10 +415,7 @@ int main(int argc, char* argv[]) {
     logcon::push("EzFiles v1.3.0 iniciado");
     logcon::push("FTP user: " + consoleUser);
     logcon::push(std::string("USB detector: ") + (usbAvailable ? "OK" : "no disponible"));
-    if (usbAvailable) {
-        // Registro MTP experimental al arranque (no bloquea, todo verificado)
-        mtp_usb::setup();
-    }
+    // MTP se activa cuando el usuario presiona [A] en SCREEN_MTP
 
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
     SDL_SetHint(SDL_HINT_RENDER_LINE_METHOD, "2");
@@ -564,7 +562,7 @@ int main(int argc, char* argv[]) {
                 snprintf(cachedTime, sizeof(cachedTime), "%02d:%02d:%02d", ti->tm_hour, ti->tm_min, ti->tm_sec);
                 snprintf(cachedDate, sizeof(cachedDate), "%02d.%02d.%04d", ti->tm_mday, ti->tm_mon + 1, ti->tm_year + 1900);
             }
-            if (usbAvailable) {
+            if (mtp_usb::g_ready) {
                 UsbState ust = UsbState_Detached;
                 if (R_SUCCEEDED(usbDsGetState(&ust)) && (int)ust != lastUsbRaw) {
                     lastUsbRaw = (int)ust;
@@ -1969,7 +1967,7 @@ int main(int argc, char* argv[]) {
 
     socketExit();
     nifmExit();
-    if (usbAvailable) usbDsExit();
+    mtp_usb::teardown(); // Limpia usb:ds si estaba activo
     accountExit();
     psmExit();
     romfsExit();

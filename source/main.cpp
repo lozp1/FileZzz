@@ -23,6 +23,7 @@
 #include "log_console.hpp"
 #include "ftp_server.hpp"
 #include "mtp_usb.hpp"
+#include "mtp_ops.hpp"
 
 // Nombre legible del estado USB real (libnx UsbState)
 inline const char* usbStateName(int st) {
@@ -50,6 +51,68 @@ enum AppScreen {
     SCREEN_ABOUT,
     SCREEN_SYS
 };
+
+// Destinos del menú principal (índice 6 = Salir, caso especial).
+// Única fuente de verdad para navegación; también la usa fillMenuDefs.
+static const AppScreen kMenuTargets[7] = {
+    SCREEN_EXPLORER, SCREEN_MTP, SCREEN_FTP, SCREEN_LANG,
+    SCREEN_THEME, SCREEN_ABOUT, SCREEN_DASHBOARD // 6: Salir (no navega)
+};
+
+// Navegación del menú principal en un solo sitio (táctil, [A], SYS).
+inline void navigateToMenuIdx(int idx, AppScreen& currentScreen, int& langSelectIdx,
+                              Language currentLanguage, int& themeSelectIdx, int& termSelectIdx,
+                              bool& showExitConfirmModal) {
+    if (idx < 0 || idx >= 7) return;
+    if (idx == 6) { showExitConfirmModal = true; sound::play(sound::SND_ACTION); return; }
+    if (idx == 3) langSelectIdx = (int)currentLanguage;
+    if (idx == 4) { themeSelectIdx = currentThemeIdx(); termSelectIdx = currentTermThemeIdx; }
+    currentScreen = kMenuTargets[idx];
+    sound::play(sound::SND_CONFIRM);
+}
+
+// Definición visual del menú (títulos/idioma + estilo + destino).
+// Se rellena una vez por frame con fillMenuDefs y la usan los 3 modos.
+struct MenuDef {
+    const char* title;
+    const char* sub;
+    SDL_Color accent;
+    SDL_Texture* icon;
+    AppScreen targetScreen;
+    bool isExit;
+};
+
+inline void fillMenuDefs(MenuDef defs[7], const ThemeColors& tc, SDL_Texture* const icons[7]) {
+    SDL_Texture* ie = icons ? icons[0] : nullptr;
+    SDL_Texture* iu = icons ? icons[1] : nullptr;
+    SDL_Texture* ift = icons ? icons[2] : nullptr;
+    SDL_Texture* il = icons ? icons[3] : nullptr;
+    SDL_Texture* it = icons ? icons[4] : nullptr;
+    SDL_Texture* ia = icons ? icons[5] : nullptr;
+    SDL_Texture* ix = icons ? icons[6] : nullptr;
+    defs[0] = { tr().menu_explorer, tr().menu_explorer_sub, tc.AccentCyan,   ie, kMenuTargets[0], false };
+    defs[1] = { tr().menu_mtp,      tr().menu_mtp_sub,      tc.AccentEmerald, iu, kMenuTargets[1], false };
+    defs[2] = { tr().menu_ftp,      tr().menu_ftp_sub,      tc.AccentViolet,  ift, kMenuTargets[2], false };
+    defs[3] = { tr().menu_lang,     tr().menu_lang_sub,     tc.AccentBlue,    il, kMenuTargets[3], false };
+    defs[4] = { tr().menu_theme,    tr().menu_theme_sub,    tc.AccentAmber,   it, kMenuTargets[4], false };
+    defs[5] = { tr().menu_about,    tr().menu_about_sub,    tc.AccentCyan,    ia, kMenuTargets[5], false };
+    defs[6] = { tr().menu_exit,     tr().menu_exit_sub,     tc.AccentRed,     ix, kMenuTargets[6], true  };
+}
+
+// Título textual por pantalla (cabecera del modo terminal).
+inline const char* screenTitle(AppScreen s) {
+    switch (s) {
+        case SCREEN_DASHBOARD: return "Main menu";
+        case SCREEN_EXPLORER:  return "Browse SD Card";
+        case SCREEN_MTP:       return "MTP Responder";
+        case SCREEN_FTP:       return "FTP Server";
+        case SCREEN_LANG:      return "Language";
+        case SCREEN_THEME:     return "Themes";
+        case SCREEN_ABOUT:     return "About";
+        case SCREEN_SYS:       return "System Logs";
+        default:               return "";
+    }
+}
 
 // Clipboard para operaciones de archivos
 enum ClipboardOp {
@@ -587,28 +650,16 @@ int main(int argc, char* argv[]) {
                     int cY = startY + i * dashStep;
                     if (touchX >= 80 && touchX <= 1200 && touchY >= cY && touchY <= cY + dashCardH) {
                         menuIdx = i;
-                        sound::play(sound::SND_CONFIRM);
-                        if (menuIdx == 0) currentScreen = SCREEN_EXPLORER;
-                        else if (menuIdx == 1) currentScreen = SCREEN_MTP;
-                        else if (menuIdx == 2) currentScreen = SCREEN_FTP;
-                        else if (menuIdx == 3) { currentScreen = SCREEN_LANG; langSelectIdx = (int)currentLanguage; }
-                        else if (menuIdx == 4) { themeSelectIdx = currentThemeIdx(); termSelectIdx = currentTermThemeIdx; currentScreen = SCREEN_THEME; }
-                        else if (menuIdx == 5) currentScreen = SCREEN_ABOUT;
-                        else if (menuIdx == 6) { showExitConfirmModal = true; sound::play(sound::SND_ACTION); }
+                        navigateToMenuIdx(menuIdx, currentScreen, langSelectIdx, currentLanguage,
+                                          themeSelectIdx, termSelectIdx, showExitConfirmModal);
                         break;
                     }
                 }
             }
 
             if (!showExitConfirmModal && (kDown & HidNpadButton_A)) {
-                sound::play(sound::SND_CONFIRM);
-                if (menuIdx == 0) currentScreen = SCREEN_EXPLORER;
-                else if (menuIdx == 1) currentScreen = SCREEN_MTP;
-                else if (menuIdx == 2) currentScreen = SCREEN_FTP;
-                else if (menuIdx == 3) { currentScreen = SCREEN_LANG; langSelectIdx = (int)currentLanguage; }
-                else if (menuIdx == 4) { themeSelectIdx = currentThemeIdx(); termSelectIdx = currentTermThemeIdx; currentScreen = SCREEN_THEME; }
-                else if (menuIdx == 5) currentScreen = SCREEN_ABOUT;
-                else if (menuIdx == 6) { showExitConfirmModal = true; sound::play(sound::SND_ACTION); }
+                navigateToMenuIdx(menuIdx, currentScreen, langSelectIdx, currentLanguage,
+                                  themeSelectIdx, termSelectIdx, showExitConfirmModal);
             }
 
             if (kDown & HidNpadButton_B) {
@@ -873,8 +924,15 @@ int main(int argc, char* argv[]) {
         else if (currentScreen == SCREEN_MTP) {
             if (kDown & HidNpadButton_A) {
                 sound::play(sound::SND_ACTION);
-                logcon::push("MTP activacion manual...");
-                mtp_usb::setup();
+                if (!mtp_usb::g_ready) {
+                    logcon::push("MTP activacion manual...");
+                    mtp_usb::setup();
+                } else if (mtp_ops::running()) {
+                    mtp_ops::stop();
+                } else {
+                    logcon::push("MTP transferencia experimental ON");
+                    mtp_ops::start(mtp_usb::g_epBulkIn, mtp_usb::g_epBulkOut);
+                }
             }
             if (kDown & HidNpadButton_Y) {
                 logcon::clear();
@@ -994,14 +1052,8 @@ int main(int argc, char* argv[]) {
                 sound::play(sound::SND_NAV);
             }
             if (kDown & HidNpadButton_A) {
-                sound::play(sound::SND_CONFIRM);
-                if (menuIdx == 0) currentScreen = SCREEN_EXPLORER;
-                else if (menuIdx == 1) currentScreen = SCREEN_MTP;
-                else if (menuIdx == 2) currentScreen = SCREEN_FTP;
-                else if (menuIdx == 3) { currentScreen = SCREEN_LANG; langSelectIdx = (int)currentLanguage; }
-                else if (menuIdx == 4) { themeSelectIdx = currentThemeIdx(); termSelectIdx = currentTermThemeIdx; currentScreen = SCREEN_THEME; }
-                else if (menuIdx == 5) currentScreen = SCREEN_ABOUT;
-                else if (menuIdx == 6) { showExitConfirmModal = true; sound::play(sound::SND_ACTION); }
+                navigateToMenuIdx(menuIdx, currentScreen, langSelectIdx, currentLanguage,
+                                  themeSelectIdx, termSelectIdx, showExitConfirmModal);
             }
             if (kDown & HidNpadButton_B) {
                 sound::play(sound::SND_BACK);
@@ -1012,6 +1064,12 @@ int main(int argc, char* argv[]) {
         // =========================================================================
         // MODO DBI: RENDER MINIMALISTA (réplica exacta de DBI)
         // =========================================================================
+        // Menú único del frame (títulos + estilo + iconos + destinos): lo usan los 3 modos.
+        const ThemeColors& tc = curTheme();
+        SDL_Texture* menuIcons[7] = { icoExplorer, icoUsb, icoFtp, icoLang, icoTheme, icoAbout, icoExit };
+        MenuDef defs[7];
+        fillMenuDefs(defs, tc, menuIcons);
+
         if ((uiMode == UI_DBI || uiMode == UI_RANGER) && currentScreen != SCREEN_SPLASH) {
             const TerminalTheme& tt = curTermTheme();
             SDL_SetRenderDrawColor(renderer, tt.bg.r, tt.bg.g, tt.bg.b, tt.bg.a);
@@ -1039,14 +1097,7 @@ int main(int argc, char* argv[]) {
             lineRGBA(renderer, 1277, 28, 1277, 690, tt.accent.r, tt.accent.g, tt.accent.b, 255);
 
             // Título centrado
-            const char* title = "Main menu";
-            if (currentScreen == SCREEN_EXPLORER) title = "Browse SD Card";
-            else if (currentScreen == SCREEN_MTP) title = "MTP Responder";
-            else if (currentScreen == SCREEN_FTP) title = "FTP Server";
-            else if (currentScreen == SCREEN_LANG) title = "Language";
-            else if (currentScreen == SCREEN_THEME) title = "Themes";
-            else if (currentScreen == SCREEN_ABOUT) title = "About";
-            else if (currentScreen == SCREEN_SYS) title = "System Logs";
+            const char* title = screenTitle(currentScreen);
 
             int tW = 0, tH = 0;
             TTF_SizeUTF8(fontJet, title, &tW, &tH);
@@ -1068,17 +1119,12 @@ int main(int argc, char* argv[]) {
             int rowH = 30;  // Aumentado para más espacio entre filas
 
             if (currentScreen == SCREEN_DASHBOARD || currentScreen == SCREEN_SYS) {
-                const char* items[7] = {
-                    tr().menu_explorer, tr().menu_mtp,   tr().menu_ftp,
-                    tr().menu_lang,     tr().menu_theme, tr().menu_about,
-                    tr().menu_exit
-                };
                 for (int i = 0; i < 7; i++) {
                     int rY = dbiY + i * rowH;
                     if (menuIdx == i) {
                         boxRGBA(renderer, 4, rY, 1275, rY + rowH, B.r, B.g, B.b, B.a);
                     }
-                    renderText(renderer, fontJet, items[i], 12, rY + 4, W);
+                    renderText(renderer, fontJet, defs[i].title, 12, rY + 4, W);
                 }
             }
             else if (currentScreen == SCREEN_EXPLORER) {
@@ -1197,7 +1243,8 @@ int main(int argc, char* argv[]) {
                 }
             }
             else if (currentScreen == SCREEN_MTP) {
-                std::string mtpSt = mtp_usb::g_ready ? "MTP Server is RUNNING" : "MTP Server is STOPPED";
+                std::string mtpSt = mtp_ops::running() ? "MTP Transfer RUNNING (experimental)"
+                    : (mtp_usb::g_ready ? "MTP Listo - pulsa [A]" : "MTP Server is STOPPED");
                 renderText(renderer, fontJet, mtpSt.c_str(), 12, dbiY + rowH*1 + 4, W);
                 renderText(renderer, fontJet, "Press [A] to Toggle", 12, dbiY + rowH*2 + 4, W);
                 renderText(renderer, fontJet, "Press [B] to Exit", 12, dbiY + rowH*3 + 4, W);
@@ -1282,12 +1329,12 @@ int main(int argc, char* argv[]) {
             wasTouch = isTouch;
             continue;
         }
-        const ThemeColors& tc = curTheme();
         SDL_SetRenderDrawColor(renderer, tc.BgBase.r, tc.BgBase.g, tc.BgBase.b, 255);
         SDL_RenderClear(renderer);
 
         // 1. RENDER SPLASH SCREEN
-        if (currentScreen == SCREEN_SPLASH) {
+        switch (currentScreen) {
+        case SCREEN_SPLASH: {
             float progress = (float)splashFrames / (float)maxSplashFrames;
             float pulse = 0.5f + 0.5f * sinf(splashFrames * 0.12f);
             float floatOffsetY = sinf(splashFrames * 0.08f) * 6.0f;
@@ -1318,7 +1365,8 @@ int main(int argc, char* argv[]) {
             renderTextCentered(renderer, fontSmall, "Presiona [A] para continuar", 640, 645, tc.TextSecondary);
         }
         // 2. RENDER DASHBOARD PRINCIPAL
-        else if (currentScreen == SCREEN_DASHBOARD) {
+        break;
+        case SCREEN_DASHBOARD: {
             // Header superior elegante
             boxRGBA(renderer, 0, 0, 1280, 80, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
             lineRGBA(renderer, 0, 80, 1280, 80, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
@@ -1374,22 +1422,7 @@ int main(int argc, char* argv[]) {
             int cardSpacing = 8;
             int cardStartY = 175;
 
-            struct MenuDef {
-                const char* title;
-                const char* sub;
-                SDL_Color accent;
-                SDL_Texture* icon;
-            };
-
-            MenuDef defs[7] = {
-                { tr().menu_explorer, tr().menu_explorer_sub, tc.AccentCyan,   icoExplorer },
-                { tr().menu_mtp,      tr().menu_mtp_sub,      tc.AccentEmerald, icoUsb },
-                { tr().menu_ftp,      tr().menu_ftp_sub,      tc.AccentViolet,  icoFtp },
-                { tr().menu_lang,     tr().menu_lang_sub,     tc.AccentBlue,    icoLang },
-                { tr().menu_theme,    tr().menu_theme_sub,    tc.AccentAmber,   icoTheme },
-                { tr().menu_about,    tr().menu_about_sub,    tc.AccentCyan,    icoAbout },
-                { tr().menu_exit,     tr().menu_exit_sub,     tc.AccentRed,     icoExit }
-            };
+            // defs[] ya viene relleno arriba (fuente única para los 3 modos).
 
             for (int i = 0; i < 7; i++) {
                 // Slide-in animation on screen entry
@@ -1433,7 +1466,8 @@ int main(int argc, char* argv[]) {
             renderText(renderer, fontSmall, modeStr, 80, 680, tc.AccentCyan);
         }
         // 3. RENDER EXPLORADOR DE ARCHIVOS
-        else if (currentScreen == SCREEN_EXPLORER) {
+        break;
+        case SCREEN_EXPLORER: {
             boxRGBA(renderer, 0, 0, 1280, 75, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
             lineRGBA(renderer, 0, 75, 1280, 75, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
 
@@ -1606,7 +1640,8 @@ int main(int argc, char* argv[]) {
             }
         }
         // 4. RENDER CONEXIÓN USB (MTP) - PLACEHOLDER + consola estilo DBI
-        else if (currentScreen == SCREEN_MTP) {
+        break;
+        case SCREEN_MTP: {
             boxRGBA(renderer, 0, 0, 1280, 80, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
             lineRGBA(renderer, 0, 80, 1280, 80, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
 
@@ -1632,16 +1667,19 @@ int main(int argc, char* argv[]) {
 
             boxRGBA(renderer, 440, cY + 132, 840, cY + 168, tc.BgCard.r, tc.BgCard.g, tc.BgCard.b, 255);
             rectangleRGBA(renderer, 440, cY + 132, 840, cY + 168, tc.AccentAmber.r, tc.AccentAmber.g, tc.AccentAmber.b, 255);
-            renderTextCentered(renderer, fontBody,
-                               (usbAvailable && mtp_usb::g_ready) ? "MTP EXPERIMENTAL: interfaz lista" : "MTP EXPERIMENTAL: interfaz no lista",
-                               640, cY + 140, tc.AccentAmber);
+            const char* mtpBadge = "MTP: interfaz no lista";
+            if (mtp_ops::running()) mtpBadge = "MTP: TRANSFIRIENDO (experimental)";
+            else if (usbAvailable && mtp_usb::g_ready) mtpBadge = "MTP: interfaz lista";
+            renderTextCentered(renderer, fontBody, mtpBadge, 640, cY + 140, tc.AccentAmber);
 
             renderTextCentered(renderer, fontSmall, tr().mtp_hint, 640, cY + 180, tc.TextMuted);
             renderTextCentered(renderer, fontSmall, "Si el PC no enumera el dispositivo, usa FTP.", 640, cY + 202, tc.TextPrimary);
 
             boxRGBA(renderer, 400, cY + 232, 880, cY + 272, tc.BgCard.r, tc.BgCard.g, tc.BgCard.b, 255);
             rectangleRGBA(renderer, 400, cY + 232, 880, cY + 272, tc.AccentEmerald.r, tc.AccentEmerald.g, tc.AccentEmerald.b, 255);
-            renderTextCentered(renderer, fontBody, "[A] Activar MTP   [Y] Limpiar log", 640, cY + 242, tc.TextMuted);
+            renderTextCentered(renderer, fontBody,
+                               mtp_ops::running() ? "[A] Detener MTP   [Y] Limpiar log" : "[A] Activar MTP   [Y] Limpiar log",
+                               640, cY + 242, tc.TextMuted);
 
             drawLogConsole(renderer, fontSmall, 140, 425, 1000, 230, tc, 9, "CONSOLA USB");
 
@@ -1649,7 +1687,8 @@ int main(int argc, char* argv[]) {
             renderText(renderer, fontSmall, tr().hint_back, 80, 680, tc.TextMuted);
         }
         // 5. RENDER SERVIDOR FTP + consola estilo DBI
-        else if (currentScreen == SCREEN_FTP) {
+        break;
+        case SCREEN_FTP: {
             boxRGBA(renderer, 0, 0, 1280, 80, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
             lineRGBA(renderer, 0, 80, 1280, 80, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
 
@@ -1699,7 +1738,8 @@ int main(int argc, char* argv[]) {
             renderText(renderer, fontSmall, tr().hint_back, 80, 680, tc.TextMuted);
         }
         // 6. RENDER PANTALLA DE IDIOMAS (11 IDIOMAS)
-        else if (currentScreen == SCREEN_LANG) {
+        break;
+        case SCREEN_LANG: {
             boxRGBA(renderer, 0, 0, 1280, 80, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
             lineRGBA(renderer, 0, 80, 1280, 80, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
 
@@ -1747,7 +1787,8 @@ int main(int argc, char* argv[]) {
             renderText(renderer, fontSmall, "[A] Aplicar Idioma · [B] Volver al Menú Principal", 80, 680, tc.TextMuted);
         }
         // 7. RENDER SELECTOR DE TEMAS
-        else if (currentScreen == SCREEN_THEME) {
+        break;
+        case SCREEN_THEME: {
             boxRGBA(renderer, 0, 0, 1280, 80, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
             lineRGBA(renderer, 0, 80, 1280, 80, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
             renderText(renderer, fontTitle, tr().menu_theme, 80, 26, tc.TextPrimary);
@@ -1789,7 +1830,8 @@ int main(int argc, char* argv[]) {
             renderText(renderer, fontSmall, "[A] Aplicar Tema  [B] Volver", 80, 680, tc.TextMuted);
         }
         // 8. RENDER ACERCA DE (CON LOS 8 CAMPOS OFICIALES DE ANDROMEDA Y SIN BORDE NARANJA)
-        else if (currentScreen == SCREEN_ABOUT) {
+        break;
+        case SCREEN_ABOUT: {
             boxRGBA(renderer, 0, 0, 1280, 80, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
             lineRGBA(renderer, 0, 80, 1280, 80, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
 
@@ -1827,7 +1869,8 @@ int main(int argc, char* argv[]) {
             renderTextCentered(renderer, fontSmall, tr().hint_back, 640, cY + 490, tc.AccentCyan);
         }
         // 9. RENDER MODO BASICO [L] - Sin estilos, fondo negro, texto blanco
-        else if (currentScreen == SCREEN_SYS) {
+        break;
+        case SCREEN_SYS: {
             // Fondo completamente negro
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
             SDL_RenderClear(renderer);
@@ -1842,16 +1885,6 @@ int main(int argc, char* argv[]) {
             lineRGBA(renderer, 40, 50, 1240, 50, 140, 140, 140, 255);
 
             // Lista de opciones - texto puro sin estilos
-            const char* items[7] = {
-                tr().menu_explorer,
-                tr().menu_mtp,
-                tr().menu_ftp,
-                tr().menu_lang,
-                tr().menu_theme,
-                tr().menu_about,
-                tr().menu_exit
-            };
-
             int startY = 70;
             int rowH   = 72;
             for (int i = 0; i < 7; i++) {
@@ -1863,14 +1896,16 @@ int main(int argc, char* argv[]) {
                 }
 
                 char line[128];
-                snprintf(line, sizeof(line), "  %d. %s", i + 1, items[i]);
+                snprintf(line, sizeof(line), "  %d. %s", i + 1, defs[i].title);
                 renderText(renderer, fontJet, line, 40, rY + 4, sel ? W : G);
             }
 
             // Pie de pagina
             lineRGBA(renderer, 40, 582, 1240, 582, 140, 140, 140, 255);
             renderText(renderer, fontJet, "[D-PAD] Navegar  [A] Seleccionar  [L] o [B] Modo Grafico", 40, 594, G);
-        } // MODAL DE CONFIRMACION DE SALIDA
+        } break;
+        } // switch (currentScreen) - render moderno
+        // MODAL DE CONFIRMACION DE SALIDA
         if (showExitConfirmModal) {
             boxRGBA(renderer, 0, 0, 1280, 720, 0, 0, 0, 200);
             int mW = 560, mH = 240;
@@ -1901,6 +1936,7 @@ int main(int argc, char* argv[]) {
     }
 
     ftp_server::stop();
+    mtp_ops::stop();
     sound::closeAudio();
     clearTextCache();
     mtp_usb::teardown();

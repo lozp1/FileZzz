@@ -61,7 +61,12 @@ inline void teardown() {
 inline bool setup() {
     teardown();
 
-    UsbDsDeviceInfo devInfo{0x057E, 0x3002, 0x0100};
+    UsbDsDeviceInfo devInfo;
+    memset(&devInfo, 0, sizeof(devInfo));
+    devInfo.idVendor = 0x057E; devInfo.idProduct = 0x3002; devInfo.bcdDevice = 0x0100;
+    snprintf(devInfo.Manufacturer, sizeof(devInfo.Manufacturer), "EzFiles");
+    snprintf(devInfo.Product, sizeof(devInfo.Product), "EzFiles MTP");
+    snprintf(devInfo.SerialNumber, sizeof(devInfo.SerialNumber), "EZF000000001");
     Result rc = usbDsSetVidPidBcd(&devInfo);
     if (R_FAILED(rc)) { mlog(std::string("MTP VidPid ERR ") + stepName(rc)); return false; }
 

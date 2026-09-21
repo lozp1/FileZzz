@@ -158,8 +158,8 @@ Result usbMtpInitialize(void)
         .bDeviceSubClass    = 0x00,
         .bDeviceProtocol    = 0x00,
         .bMaxPacketSize0    = 0x40,
-        .idVendor           = 0x057e,
-        .idProduct          = 0x4000,
+        .idVendor           = 0x0955,  /* NVIDIA/Android — mismo que DBI, Windows ya tiene MTBClassDriver */
+        .idProduct          = 0x7321,
         .bcdDevice          = 0x0100,
         .iManufacturer      = iManufacturer,
         .iProduct           = iProduct,

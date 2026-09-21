@@ -208,7 +208,7 @@ inline bool epReadExact(UsbDsEndpoint* /*ep*/, u8* buf, size_t len) {
 // --- Constructores de datasets ---
 inline std::vector<u8> dsDeviceInfo() {
     std::vector<u8> v;
-    put16(v, 100); put32(v, 0); put16(v, 100); putEmptyStr(v); put16(v, 0);
+    put16(v, 100); put32(v, 6); put16(v, 100); putStr(v, "microsoft.com: 1.0;"); put16(v, 0);
     u16 ops[] = { OP_GetDeviceInfo, OP_OpenSession, OP_CloseSession, OP_GetStorageIDs,
                   OP_GetStorageInfo, OP_GetNumObjects, OP_GetObjectHandles, OP_GetObjectInfo,
                   OP_GetObject, OP_DeleteObject, OP_SendObjectInfo, OP_SendObject };

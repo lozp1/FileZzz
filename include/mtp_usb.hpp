@@ -28,7 +28,7 @@ inline bool setup() {
         return false;
     }
     g_ready = true;
-    mlog("USB MTP: Inicializado OK (0x057E:0x4000)");
+    mlog("USB MTP: Inicializado OK (0x0955:0x7321)");
     mlog("USB MTP: Listo para transferencias en PC");
     return true;
 }

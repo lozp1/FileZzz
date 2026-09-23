@@ -15,7 +15,7 @@
 class ExplorerTab : public brls::Box {
 public:
     ExplorerTab() {
-        this->inflateFromXMLRes("xml/view_explorer.xml");
+        this->inflateFromXMLFile("romfs:/xml/view_explorer.xml");
         currentPath = "sdmc:/";
         refreshList();
     }
@@ -25,6 +25,10 @@ public:
     }
 
     void refreshList() {
+        brls::Box* boxFiles = dynamic_cast<brls::Box*>(this->getView("boxFiles"));
+        brls::Label* lblCurrentPath = dynamic_cast<brls::Label*>(this->getView("lblCurrentPath"));
+        brls::Label* lblItemCount = dynamic_cast<brls::Label*>(this->getView("lblItemCount"));
+
         if (!boxFiles) return;
         boxFiles->clearViews();
 
@@ -90,16 +94,17 @@ public:
 
 private:
     std::string currentPath;
-    BRLS_BIND(brls::Label, lblCurrentPath, "lblCurrentPath");
-    BRLS_BIND(brls::Label, lblItemCount, "lblItemCount");
-    BRLS_BIND(brls::Box, boxFiles, "boxFiles");
 };
 
 // --- Tab 2: USB MTP Responder ---
 class MtpTab : public brls::Box {
 public:
     MtpTab() {
-        this->inflateFromXMLRes("xml/view_mtp.xml");
+        this->inflateFromXMLFile("romfs:/xml/view_mtp.xml");
+
+        btnToggleMtp = dynamic_cast<brls::Button*>(this->getView("btnToggleMtp"));
+        lblMtpStatus = dynamic_cast<brls::Label*>(this->getView("lblMtpStatus"));
+        lblMtpInfo = dynamic_cast<brls::Label*>(this->getView("lblMtpInfo"));
 
         if (btnToggleMtp) {
             btnToggleMtp->registerClickAction([this](brls::View*) {
@@ -115,6 +120,8 @@ public:
                 return true;
             });
         }
+
+        updateUIState(mtp_ops::running());
 
         // Tarea periódica de actualización de telemetría
         updateTimer.setCallback([this]() {
@@ -169,16 +176,20 @@ public:
 
 private:
     brls::RepeatingTimer updateTimer;
-    BRLS_BIND(brls::Label, lblMtpStatus, "lblMtpStatus");
-    BRLS_BIND(brls::Label, lblMtpInfo, "lblMtpInfo");
-    BRLS_BIND(brls::Button, btnToggleMtp, "btnToggleMtp");
+    brls::Button* btnToggleMtp = nullptr;
+    brls::Label* lblMtpStatus = nullptr;
+    brls::Label* lblMtpInfo = nullptr;
 };
 
 // --- Tab 3: Servidor FTP ---
 class FtpTab : public brls::Box {
 public:
     FtpTab() {
-        this->inflateFromXMLRes("xml/view_ftp.xml");
+        this->inflateFromXMLFile("romfs:/xml/view_ftp.xml");
+
+        btnToggleFtp = dynamic_cast<brls::Button*>(this->getView("btnToggleFtp"));
+        lblFtpStatus = dynamic_cast<brls::Label*>(this->getView("lblFtpStatus"));
+        lblFtpAddress = dynamic_cast<brls::Label*>(this->getView("lblFtpAddress"));
 
         if (btnToggleFtp) {
             btnToggleFtp->registerClickAction([this](brls::View*) {
@@ -214,40 +225,53 @@ public:
     }
 
 private:
-    BRLS_BIND(brls::Label, lblFtpStatus, "lblFtpStatus");
-    BRLS_BIND(brls::Label, lblFtpAddress, "lblFtpAddress");
-    BRLS_BIND(brls::Button, btnToggleFtp, "btnToggleFtp");
+    brls::Button* btnToggleFtp = nullptr;
+    brls::Label* lblFtpStatus = nullptr;
+    brls::Label* lblFtpAddress = nullptr;
 };
 
 // --- Actividad Principal ---
 class MainActivity : public brls::Activity {
 public:
-    CONTENT_FROM_XML_RES("xml/main_tabs.xml");
+    CONTENT_FROM_XML_FILE("romfs:/xml/main_tabs.xml");
 };
 
 int main(int argc, char* argv[]) {
-    // Inicializar servicios Horizon OS
-    romfsInit();
-    socketInitializeDefault();
+    // Configurar bitácora persistente en SD para diagnóstico
+    mkdir("sdmc:/switch", 0777);
+    mkdir("sdmc:/switch/EzFiles", 0777);
+    FILE* logf = fopen("sdmc:/switch/EzFiles/ezfiles.log", "w");
+    if (logf) {
+        brls::Logger::setLogLevel(brls::LogLevel::LOG_DEBUG);
+        brls::Logger::setLogOutput(logf);
+        brls::Logger::info("EzFiles Borealis iniciando...");
+    }
 
     if (!brls::Application::init()) {
         brls::Logger::error("No se pudo inicializar Borealis");
+        if (logf) fclose(logf);
         return EXIT_FAILURE;
     }
 
     brls::Application::createWindow("EzFiles");
     brls::Application::getPlatform()->setThemeVariant(brls::ThemeVariant::DARK);
 
+    // Salir de la aplicación limpiamente con botón '+' (START)
+    brls::Application::setGlobalQuit(true);
+
     // Registrar vistas personalizadas del XML
     brls::Application::registerXMLView("ExplorerTab", ExplorerTab::create);
     brls::Application::registerXMLView("MtpTab", MtpTab::create);
     brls::Application::registerXMLView("FtpTab", FtpTab::create);
 
-    brls::Application::pushActivity(new MainActivity());
+    try {
+        brls::Application::pushActivity(new MainActivity());
+        while (brls::Application::mainLoop());
+    } catch (const std::exception& e) {
+        brls::Logger::error("Excepción interceptada: {}", e.what());
+    }
 
-    while (brls::Application::mainLoop());
-
-    // Cierre limpio
+    // Cierre limpio de servicios de fondo
     if (mtp_ops::running()) {
         mtp_ops::stop();
         mtp_usb::teardown();
@@ -256,7 +280,10 @@ int main(int argc, char* argv[]) {
         ftp_server::stop();
     }
 
-    socketExit();
-    romfsExit();
+    if (logf) {
+        brls::Logger::info("EzFiles cerrado correctamente.");
+        fclose(logf);
+    }
+
     return EXIT_SUCCESS;
 }

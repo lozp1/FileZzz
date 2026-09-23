@@ -944,6 +944,11 @@ int main(int argc, char* argv[]) {
             }
             if (kDown & HidNpadButton_B) {
                 sound::play(sound::SND_BACK);
+                if (mtp_ops::running() || mtp_usb::g_ready) {
+                    mtp_ops::stop();
+                    mtp_usb::teardown();
+                    logcon::push("MTP desconectado");
+                }
                 currentScreen = SCREEN_DASHBOARD;
             }
         }
@@ -970,6 +975,11 @@ int main(int argc, char* argv[]) {
             }
             if (kDown & HidNpadButton_B) {
                 sound::play(sound::SND_BACK);
+                if (ftpRunning) {
+                    ftp_server::stop();
+                    ftpRunning = false;
+                    logcon::push("FTP desconectado");
+                }
                 currentScreen = SCREEN_DASHBOARD;
             }
         }

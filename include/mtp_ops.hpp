@@ -246,6 +246,61 @@ inline const MtpObj* mtpFind(u32 h) {
     return nullptr;
 }
 
+// --- Gestión de montaje de memoria interna (NAND User) ---
+inline FsFileSystem g_nandUserFs;
+inline bool g_nandUserMounted = false;
+
+inline bool mountNandUser() {
+    if (g_nandUserMounted) return true;
+    Result rc = fsOpenBisFileSystem(&g_nandUserFs, FsBisPartitionId_User, "");
+    if (R_SUCCEEDED(rc)) {
+        int dev = fsdevMountDevice("user", g_nandUserFs);
+        if (dev != -1) {
+            g_nandUserMounted = true;
+            return true;
+        }
+        fsFsClose(&g_nandUserFs);
+    }
+    return false;
+}
+
+inline void unmountNandUser() {
+    if (g_nandUserMounted) {
+        fsdevUnmountDevice("user");
+        fsFsClose(&g_nandUserFs);
+        g_nandUserMounted = false;
+    }
+}
+
+// Escanea recursivamente el Álbum para exponer todas las capturas y videos directamente en la raíz
+inline void mtpScanAlbumRecursive(u32 storage, const std::string& dirPath, std::vector<u32>& handles) {
+    DIR* d = opendir(dirPath.c_str());
+    if (!d) return;
+
+    struct dirent* e;
+    while ((e = readdir(d)) != NULL) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        std::string fp = mtpJoin(dirPath, e->d_name);
+        struct stat st;
+        if (stat(fp.c_str(), &st) != 0) continue;
+
+        if (S_ISDIR(st.st_mode)) {
+            mtpScanAlbumRecursive(storage, fp, handles);
+        } else {
+            std::string ext = "";
+            size_t dot = std::string(e->d_name).find_last_of('.');
+            if (dot != std::string::npos) ext = std::string(e->d_name).substr(dot);
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+            if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".mp4") {
+                u32 h = getOrRegisterHandle(storage, fp, 0, e->d_name, false, (u64)st.st_size, st.st_mtime);
+                handles.push_back(h);
+            }
+        }
+    }
+    closedir(d);
+}
+
 // --- Bulk I/O delegadas al driver de hardware usbMtpTransfer ---
 inline bool epWrite(UsbDsEndpoint* /*ep*/, const u8* data, size_t len) {
     if (!g_run) return false;
@@ -405,9 +460,10 @@ inline std::vector<u8> dsStorageInfo(u32 storage_id) {
             cap = (u64)sv.f_blocks * sv.f_frsize;
             fr = (u64)sv.f_bavail * sv.f_frsize;
         }
-        desc = "3: Instalador (Drop NSP/NSZ)";
+        desc = "3: Drop NSP/NSZ/XCI";
         name = "installer";
     } else if (storage_id == STORAGE_NAND) {
+        mountNandUser();
         if (statvfs("user:/", &sv) == 0) {
             cap = (u64)sv.f_blocks * sv.f_frsize;
             fr = (u64)sv.f_bavail * sv.f_frsize;
@@ -491,10 +547,6 @@ inline void worker() {
             return 0;
         };
 
-        char ob[64];
-        snprintf(ob, sizeof(ob), "MTP op 0x%04X tx=%u", code, tx);
-        mtp_usb::mlog(ob);
-
         switch (code) {
         case OP_GetDeviceInfo: {
             auto d = dsDeviceInfo();
@@ -510,9 +562,8 @@ inline void worker() {
                 mtpScanDirectory(STORAGE_SD, "sdmc:/", 0);
             }
             if (AppConfig::get().mtpShowAlbum) {
-                mkdir("sdmc:/Nintendo", 0777);
-                mkdir("sdmc:/Nintendo/Album", 0777);
-                mtpScanDirectory(STORAGE_ALBUM, "sdmc:/Nintendo/Album", 0);
+                std::vector<u32> aHs;
+                mtpScanAlbumRecursive(STORAGE_ALBUM, "sdmc:/Nintendo/Album", aHs);
             }
             if (AppConfig::get().mtpEnableInstaller) {
                 mkdir("sdmc:/switch", 0777);
@@ -521,14 +572,18 @@ inline void worker() {
                 mtpScanDirectory(STORAGE_INSTALL, "sdmc:/switch/EzFiles/install", 0);
             }
             if (AppConfig::get().mtpShowNANDUser) {
+                mountNandUser();
                 mtpScanDirectory(STORAGE_NAND, "user:/", 0);
             }
+            mtp_usb::mlog("MTP: PC conectada");
             sendResponse(tx, MR_OK, nullptr, 0);
             break;
         }
         case OP_CloseSession:
             g_session = 0;
             g_objs.clear();
+            unmountNandUser();
+            mtp_usb::mlog("MTP: PC desconectada");
             sendResponse(tx, MR_OK, nullptr, 0);
             break;
         case OP_GetStorageIDs: {
@@ -568,6 +623,7 @@ inline void worker() {
                     scanPath = "sdmc:/switch/EzFiles/install";
                     targetStorage = STORAGE_INSTALL;
                 } else if (storage == STORAGE_NAND) {
+                    mountNandUser();
                     scanPath = "user:/";
                     targetStorage = STORAGE_NAND;
                 } else {
@@ -584,7 +640,11 @@ inline void worker() {
                 }
             }
             if (hs.empty()) {
-                hs = mtpScanDirectory(targetStorage, scanPath, targetParent);
+                if (targetStorage == STORAGE_ALBUM && targetParent == 0) {
+                    mtpScanAlbumRecursive(targetStorage, "sdmc:/Nintendo/Album", hs);
+                } else {
+                    hs = mtpScanDirectory(targetStorage, scanPath, targetParent);
+                }
             }
 
             if (code == OP_GetNumObjects) {
@@ -608,14 +668,21 @@ inline void worker() {
         case OP_GetObject: {
             const MtpObj* o = len >= 16 ? mtpFind(P(0)) : nullptr;
             if (!o || o->dir) { sendResponse(tx, MR_InvalidObjectHandle, nullptr, 0); break; }
-            char b[96]; snprintf(b, sizeof(b), "MTP GET %s (%llu B)", o->name.c_str(), (unsigned long long)o->size);
+            char b[128];
+            snprintf(b, sizeof(b), "Enviando a PC: %s (%.1f MB)", o->name.c_str(), (double)o->size / (1024.0 * 1024.0));
             mtp_usb::mlog(b);
             if (sendFileData(code, tx, o->path, o->size)) sendResponse(tx, MR_OK, nullptr, 0);
             break;
         }
         case OP_DeleteObject: {
             const MtpObj* o = len >= 16 ? mtpFind(P(0)) : nullptr;
+            std::string delName = o ? o->name : "";
             bool ok = o && mtpDelRec(o->path);
+            if (ok && !delName.empty()) {
+                char b[128];
+                snprintf(b, sizeof(b), "Eliminado: %s", delName.c_str());
+                mtp_usb::mlog(b);
+            }
             sendResponse(tx, ok ? MR_OK : MR_GeneralError, nullptr, 0);
             break;
         }
@@ -645,7 +712,10 @@ inline void worker() {
                 mkdir("sdmc:/switch/EzFiles", 0777);
                 mkdir("sdmc:/switch/EzFiles/install", 0777);
                 parentPath = "sdmc:/switch/EzFiles/install";
-            } else if (targetStorage == STORAGE_NAND) parentPath = "user:/";
+            } else if (targetStorage == STORAGE_NAND) {
+                mountNandUser();
+                parentPath = "user:/";
+            }
 
             if (parentH != 0 && parentH != 0xFFFFFFFF) {
                 const MtpObj* po = mtpFind(parentH);
@@ -653,6 +723,10 @@ inline void worker() {
             }
 
             std::string targetPath = mtpJoin(parentPath, filename);
+
+            char logMsg[128];
+            snprintf(logMsg, sizeof(logMsg), "Recibiendo: %s", filename.c_str());
+            mtp_usb::mlog(logMsg);
 
             if (objFormat == F_Association) {
                 mkdir(targetPath.c_str(), 0777);
@@ -685,10 +759,6 @@ inline void worker() {
                 g_pendingSendPath = "";
                 break;
             }
-
-            char logMsg[128];
-            snprintf(logMsg, sizeof(logMsg), "MTP RECV %s...", g_pendingSendPath.c_str());
-            mtp_usb::mlog(logMsg);
 
             alignas(0x1000) static u8 s_recvDataBuf[0x10000];
             size_t firstGot = usbMtpTransfer(MTP_EP_BULK_OUT, 0, s_recvDataBuf, sizeof(s_recvDataBuf), 5000000000ULL);
@@ -738,13 +808,15 @@ inline void worker() {
                 }
             }
 
+            char logMsg[128];
+            std::string finalName = g_pendingSendPath.substr(g_pendingSendPath.find_last_of('/') + 1);
             if (g_pendingSendStorage == STORAGE_INSTALL) {
-                snprintf(logMsg, sizeof(logMsg), "Instalador: %s recibido (%llu MB)",
-                         g_pendingSendPath.substr(g_pendingSendPath.find_last_of('/') + 1).c_str(),
-                         (unsigned long long)(totalReceived / (1024 * 1024)));
+                snprintf(logMsg, sizeof(logMsg), "Instalador: %s guardado (%.1f MB)",
+                         finalName.c_str(), (double)totalReceived / (1024.0 * 1024.0));
                 mtp_usb::mlog(logMsg);
             } else {
-                snprintf(logMsg, sizeof(logMsg), "MTP: Guardado %llu bytes", (unsigned long long)totalReceived);
+                snprintf(logMsg, sizeof(logMsg), "Guardado: %s (%.1f MB)",
+                         finalName.c_str(), (double)totalReceived / (1024.0 * 1024.0));
                 mtp_usb::mlog(logMsg);
             }
 

@@ -9,7 +9,7 @@ struct AppConfig {
     bool mtpShowSD = true;
     bool mtpShowAlbum = true;
     bool mtpEnableInstaller = true;
-    bool mtpShowNANDUser = false;
+    bool mtpShowNANDUser = true;
 
     // Installer settings
     std::string installerTarget = "SDCard"; // "SDCard" o "NAND"

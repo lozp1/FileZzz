@@ -1,5 +1,4 @@
 <brls:Box
-    xmlns:brls="http://borealis.org/borealis"
     width="auto"
     height="auto"
     axis="column"

@@ -5,11 +5,52 @@
 #include <unistd.h>
 #include <vector>
 #include <string>
+#include <algorithm>
 
 #include "mtp_usb.hpp"
 #include "mtp_ops.hpp"
 #include "ftp_server.hpp"
 #include "config.hpp"
+
+// Portapapeles global del explorador
+inline std::string g_clipboardPath = "";
+inline bool g_clipboardIsCut = false;
+
+// Utilidad para copiar archivos en bloque
+inline bool copyFile(const std::string& src, const std::string& dst) {
+    FILE* in = fopen(src.c_str(), "rb");
+    if (!in) return false;
+    FILE* out = fopen(dst.c_str(), "wb");
+    if (!out) { fclose(in); return false; }
+    char buf[65536];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+        if (fwrite(buf, 1, n, out) != n) {
+            fclose(in); fclose(out);
+            unlink(dst.c_str());
+            return false;
+        }
+    }
+    fclose(in);
+    fclose(out);
+    return true;
+}
+
+// Teclado nativo de Horizon OS (Swkbd)
+inline std::string showHorizonKeyboard(const std::string& headerText, const std::string& initialText) {
+    char outText[256] = {0};
+    SwkbdConfig kbd;
+    Result rc = swkbdCreate(&kbd, 0);
+    if (R_SUCCEEDED(rc)) {
+        swkbdConfigMakePresetDefault(&kbd);
+        swkbdConfigSetHeaderText(&kbd, headerText.c_str());
+        swkbdConfigSetInitialText(&kbd, initialText.c_str());
+        swkbdShow(&kbd, outText, sizeof(outText));
+        swkbdClose(&kbd);
+        if (outText[0] != '\0') return std::string(outText);
+    }
+    return initialText;
+}
 
 // --- Tab 1: Explorador de Archivos ---
 class ExplorerTab : public brls::Box {
@@ -36,6 +77,32 @@ public:
         if (!dir) return;
 
         if (lblCurrentPath) lblCurrentPath->setText(currentPath);
+
+        // Barra de pegado si hay un elemento en portapapeles
+        if (!g_clipboardPath.empty()) {
+            size_t slash = g_clipboardPath.find_last_of('/');
+            std::string clipName = (slash != std::string::npos) ? g_clipboardPath.substr(slash + 1) : g_clipboardPath;
+            auto pasteItem = new brls::DetailCell();
+            pasteItem->setText(std::string(">> PEGAR AQUÍ: ") + clipName);
+            pasteItem->setDetailText(g_clipboardIsCut ? "[Mover archivo]" : "[Copiar archivo]");
+            pasteItem->setTextColor(nvgRGB(16, 185, 129));
+            pasteItem->registerClickAction([this, clipName](brls::View*) {
+                std::string destPath = currentPath + (currentPath.back() == '/' ? "" : "/") + clipName;
+                if (g_clipboardIsCut) {
+                    if (rename(g_clipboardPath.c_str(), destPath.c_str()) != 0) {
+                        copyFile(g_clipboardPath, destPath);
+                        unlink(g_clipboardPath.c_str());
+                    }
+                } else {
+                    copyFile(g_clipboardPath, destPath);
+                }
+                g_clipboardPath = "";
+                g_clipboardIsCut = false;
+                refreshList();
+                return true;
+            });
+            boxFiles->addView(pasteItem);
+        }
 
         struct dirent* entry;
         int count = 0;
@@ -83,6 +150,12 @@ public:
                 else if (sz < 1024*1024*1024) snprintf(sBuf, sizeof(sBuf), "%.2f MB", sz / (1024.0*1024.0));
                 else snprintf(sBuf, sizeof(sBuf), "%.2f GB", sz / (1024.0*1024.0*1024.0));
                 cell->setDetailText(sBuf);
+
+                // Opciones contextuales para archivos
+                cell->registerClickAction([this, fullPath, name, sz](brls::View*) {
+                    showFileActionsDialog(fullPath, name, sz);
+                    return true;
+                });
             }
             boxFiles->addView(cell);
             count++;
@@ -90,6 +163,53 @@ public:
         closedir(dir);
 
         if (lblItemCount) lblItemCount->setText(std::to_string(count) + " elementos");
+    }
+
+    void showFileActionsDialog(const std::string& fullPath, const std::string& name, u64 sz) {
+        brls::Dialog* d = new brls::Dialog(name);
+        d->addButton("Copiar", [this, fullPath]() {
+            g_clipboardPath = fullPath;
+            g_clipboardIsCut = false;
+            refreshList();
+        });
+        d->addButton("Cortar", [this, fullPath]() {
+            g_clipboardPath = fullPath;
+            g_clipboardIsCut = true;
+            refreshList();
+        });
+        d->addButton("Más opciones", [this, fullPath, name, sz]() {
+            showSecondaryActionsDialog(fullPath, name, sz);
+        });
+        d->open();
+    }
+
+    void showSecondaryActionsDialog(const std::string& fullPath, const std::string& name, u64 sz) {
+        brls::Dialog* d2 = new brls::Dialog(name);
+        d2->addButton("Renombrar", [this, fullPath, name]() {
+            std::string newName = showHorizonKeyboard("Nuevo nombre de archivo", name);
+            if (!newName.empty() && newName != name) {
+                std::string newPath = currentPath + (currentPath.back() == '/' ? "" : "/") + newName;
+                rename(fullPath.c_str(), newPath.c_str());
+                refreshList();
+            }
+        });
+        d2->addButton("Eliminar", [this, fullPath, name]() {
+            brls::Dialog* confirm = new brls::Dialog("¿Seguro que deseas eliminar '" + name + "'?");
+            confirm->addButton("Eliminar", [this, fullPath]() {
+                unlink(fullPath.c_str());
+                refreshList();
+            });
+            confirm->addButton("Cancelar", []() {});
+            confirm->open();
+        });
+        d2->addButton("Propiedades", [this, fullPath, name, sz]() {
+            char pBuf[256];
+            snprintf(pBuf, sizeof(pBuf), "Ruta: %s\nTamaño: %llu bytes", fullPath.c_str(), (unsigned long long)sz);
+            brls::Dialog* prop = new brls::Dialog(pBuf);
+            prop->addButton("Aceptar", []() {});
+            prop->open();
+        });
+        d2->open();
     }
 
 private:
@@ -123,11 +243,11 @@ public:
 
         updateUIState(mtp_ops::running());
 
-        // Tarea periódica de actualización de telemetría
+        // Tarea periódica de actualización de telemetría (4 Hz)
         updateTimer.setCallback([this]() {
             updateTelemetry();
         });
-        updateTimer.start(250); // 4 Hz
+        updateTimer.start(250);
     }
 
     ~MtpTab() {
@@ -168,7 +288,7 @@ public:
                 lblMtpInfo->setText(info);
                 lblMtpInfo->setTextColor(nvgRGB(6, 182, 212));
             } else {
-                lblMtpInfo->setText("5 Particiones: MicroSD, Álbum, Instalador, NAND, Juegos");
+                lblMtpInfo->setText("8 Particiones: SD, User, System, Juegos, Install SD/NAND, Saves, Album");
                 lblMtpInfo->setTextColor(nvgRGB(156, 163, 175));
             }
         }
@@ -230,10 +350,81 @@ private:
     brls::Label* lblFtpAddress = nullptr;
 };
 
+// --- Tab 4: Ajustes ---
+class SettingsTab : public brls::Box {
+public:
+    SettingsTab() {
+        this->inflateFromXMLFile("romfs:/xml/view_settings.xml");
+
+        cellTheme = dynamic_cast<brls::DetailCell*>(this->getView("cellTheme"));
+        cellLanguage = dynamic_cast<brls::DetailCell*>(this->getView("cellLanguage"));
+
+        if (cellTheme) {
+            cellTheme->registerClickAction([this](brls::View*) {
+                bool isDark = (brls::Application::getPlatform()->getThemeVariant() == brls::ThemeVariant::DARK);
+                brls::Application::getPlatform()->setThemeVariant(isDark ? brls::ThemeVariant::LIGHT : brls::ThemeVariant::DARK);
+                cellTheme->setDetailText(isDark ? "Claro" : "Oscuro (Predeterminado)");
+                return true;
+            });
+        }
+
+        if (cellLanguage) {
+            cellLanguage->registerClickAction([this](brls::View*) {
+                brls::Dialog* d = new brls::Dialog("Seleccionar idioma");
+                d->addButton("Español (Predeterminado)", [this]() {
+                    cellLanguage->setDetailText("Español");
+                });
+                d->addButton("English", [this]() {
+                    cellLanguage->setDetailText("English");
+                });
+                d->open();
+                return true;
+            });
+        }
+    }
+
+    static brls::View* create() {
+        return new SettingsTab();
+    }
+
+private:
+    brls::DetailCell* cellTheme = nullptr;
+    brls::DetailCell* cellLanguage = nullptr;
+};
+
+// --- Tab 5: Acerca de ---
+class AboutTab : public brls::Box {
+public:
+    AboutTab() {
+        this->inflateFromXMLFile("romfs:/xml/view_about.xml");
+    }
+
+    static brls::View* create() {
+        return new AboutTab();
+    }
+};
+
 // --- Actividad Principal ---
 class MainActivity : public brls::Activity {
 public:
     CONTENT_FROM_XML_FILE("romfs:/xml/main_tabs.xml");
+};
+
+// --- Pantalla de Inicio / Splash Screen ---
+class SplashActivity : public brls::Activity {
+public:
+    CONTENT_FROM_XML_FILE("romfs:/xml/view_splash.xml");
+
+    SplashActivity() {
+        splashTimer.setCallback([this]() {
+            splashTimer.stop();
+            brls::Application::pushActivity(new MainActivity(), brls::TransitionAnimation::FADE);
+        });
+        splashTimer.start(1200); // 1.2 segundos con fade automático
+    }
+
+private:
+    brls::RepeatingTimer splashTimer;
 };
 
 int main(int argc, char* argv[]) {
@@ -246,6 +437,9 @@ int main(int argc, char* argv[]) {
         brls::Logger::setLogOutput(logf);
         brls::Logger::info("EzFiles Borealis iniciando...");
     }
+
+    // Configurar idioma predeterminado al español
+    brls::Platform::APP_LOCALE_DEFAULT = "es-419";
 
     if (!brls::Application::init()) {
         brls::Logger::error("No se pudo inicializar Borealis");
@@ -263,9 +457,11 @@ int main(int argc, char* argv[]) {
     brls::Application::registerXMLView("ExplorerTab", ExplorerTab::create);
     brls::Application::registerXMLView("MtpTab", MtpTab::create);
     brls::Application::registerXMLView("FtpTab", FtpTab::create);
+    brls::Application::registerXMLView("SettingsTab", SettingsTab::create);
+    brls::Application::registerXMLView("AboutTab", AboutTab::create);
 
     try {
-        brls::Application::pushActivity(new MainActivity());
+        brls::Application::pushActivity(new SplashActivity());
         while (brls::Application::mainLoop());
     } catch (const std::exception& e) {
         brls::Logger::error("Excepción interceptada: {}", e.what());

@@ -17,5 +17,13 @@
             <FtpTab />
         </brls:Tab>
 
+        <brls:Tab label="Ajustes">
+            <SettingsTab />
+        </brls:Tab>
+
+        <brls:Tab label="Acerca de">
+            <AboutTab />
+        </brls:Tab>
+
     </brls:TabFrame>
 </brls:AppletFrame>

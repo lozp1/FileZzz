@@ -8,8 +8,12 @@
     paddingBottom="20px">
 
     <brls:Header
-        title="Servidor FTP Inalámbrico"
-        subtitle="Transfiere archivos mediante Wi-Fi desde cualquier cliente FTP (FileZilla, WinSCP)" />
+        title="Servidor FTP Inalámbrico" />
+    <brls:Label
+        text="Transfiere archivos mediante Wi-Fi desde cualquier cliente FTP (FileZilla, WinSCP)"
+        fontSize="15px"
+        textColor="#9CA3AF"
+        marginTop="4px" />
 
     <brls:Box
         width="auto"

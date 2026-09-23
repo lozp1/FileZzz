@@ -1,0 +1,58 @@
+<brls:Box
+    width="auto"
+    height="auto"
+    axis="column"
+    paddingTop="20px"
+    paddingLeft="40px"
+    paddingRight="40px"
+    paddingBottom="20px">
+
+    <brls:Header
+        title="Ajustes y Personalización" />
+    <brls:Label
+        text="Configura la apariencia y el comportamiento de la aplicación"
+        fontSize="15px"
+        textColor="#9CA3AF"
+        marginTop="4px" />
+
+    <brls:ScrollingFrame
+        width="auto"
+        height="500px"
+        marginTop="20px">
+        <brls:Box
+            width="auto"
+            height="auto"
+            axis="column">
+
+            <brls:Header
+                title="Apariencia"
+                marginTop="10px" />
+
+            <brls:DetailCell
+                id="cellTheme"
+                title="Tema visual"
+                detail="Oscuro (Predeterminado)" />
+
+            <brls:DetailCell
+                id="cellLanguage"
+                title="Idioma"
+                detail="Español" />
+
+            <brls:Header
+                title="Servicios de Red"
+                marginTop="20px" />
+
+            <brls:DetailCell
+                id="cellFtpPort"
+                title="Puerto del Servidor FTP"
+                detail="5000" />
+
+            <brls:DetailCell
+                id="cellMtpPartitions"
+                title="Particiones USB MTP"
+                detail="8 Unidades (Estilo DBI)" />
+
+        </brls:Box>
+    </brls:ScrollingFrame>
+
+</brls:Box>

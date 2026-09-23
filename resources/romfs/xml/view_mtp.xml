@@ -8,8 +8,12 @@
     paddingBottom="20px">
 
     <brls:Header
-        title="Transferencia USB MTP"
-        subtitle="Conecta la consola a tu PC con un cable USB-C de datos" />
+        title="Transferencia USB MTP" />
+    <brls:Label
+        text="Conecta la consola a tu PC con un cable USB-C de datos"
+        fontSize="15px"
+        textColor="#9CA3AF"
+        marginTop="4px" />
 
     <brls:Box
         width="auto"

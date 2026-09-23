@@ -180,12 +180,15 @@ inline std::string getMtpStr(const u8* p, size_t maxBytes) {
     return out;
 }
 
-// --- Particiones y Almacenamientos MTP soportados ---
-constexpr u32 STORAGE_SD      = 0x00010001; // 1: MicroSD
-constexpr u32 STORAGE_ALBUM   = 0x00020001; // 2: Album y Capturas
-constexpr u32 STORAGE_INSTALL = 0x00030001; // 3: Drop NSP/NSZ/XCI
-constexpr u32 STORAGE_NAND    = 0x00040001; // 4: Memoria Interna (NAND User)
-constexpr u32 STORAGE_GAMES   = 0x00050001; // 5: Juegos Instalados
+// --- Particiones y Almacenamientos MTP soportados (DBI Style) ---
+constexpr u32 STORAGE_SD           = 0x00010001; // 1: SD Card
+constexpr u32 STORAGE_NAND_USER    = 0x00010002; // 2: Nand USER
+constexpr u32 STORAGE_NAND_SYS     = 0x00010003; // 3: Nand SYSTEM
+constexpr u32 STORAGE_GAMES        = 0x00010004; // 4: Installed games
+constexpr u32 STORAGE_INSTALL_SD   = 0x00010005; // 5: SD Card install
+constexpr u32 STORAGE_INSTALL_NAND = 0x00010006; // 6: NAND install
+constexpr u32 STORAGE_SAVES        = 0x00010007; // 7: Saves
+constexpr u32 STORAGE_ALBUM        = 0x00010008; // 8: Album
 
 // --- FS local ---
 struct MtpObj {
@@ -307,6 +310,31 @@ inline void unmountNandUser() {
     }
 }
 
+inline FsFileSystem g_nandSysFs;
+inline bool g_nandSysMounted = false;
+
+inline bool mountNandSys() {
+    if (g_nandSysMounted) return true;
+    Result rc = fsOpenBisFileSystem(&g_nandSysFs, FsBisPartitionId_System, "");
+    if (R_SUCCEEDED(rc)) {
+        int dev = fsdevMountDevice("system", g_nandSysFs);
+        if (dev != -1) {
+            g_nandSysMounted = true;
+            return true;
+        }
+        fsFsClose(&g_nandSysFs);
+    }
+    return false;
+}
+
+inline void unmountNandSys() {
+    if (g_nandSysMounted) {
+        fsdevUnmountDevice("system");
+        fsFsClose(&g_nandSysFs);
+        g_nandSysMounted = false;
+    }
+}
+
 // Escanea recursivamente el Álbum para exponer todas las capturas y videos directamente en la raíz
 inline void mtpScanAlbumRecursive(u32 storage, const std::string& dirPath, std::vector<u32>& handles) {
     DIR* d = opendir(dirPath.c_str());
@@ -356,35 +384,45 @@ inline void mtpScanAllAlbums(u32 storage, std::vector<u32>& handles) {
     mtpScanAlbumRecursive(storage, "user:/Album", handles);
 }
 
-// Prepara la partición virtual de instalación al estilo DBI (placeholder sin extensión y limpieza de temporales)
+// Prepara las particiones virtuales de instalación al estilo DBI (SD y NAND)
 inline void mtpScanInstaller(u32 storage, std::vector<u32>& handles) {
+    bool isNand = (storage == STORAGE_INSTALL_NAND);
+    std::string folder = isNand ? "sdmc:/switch/EzFiles/install_nand" : "sdmc:/switch/EzFiles/install_sd";
     mkdir("sdmc:/switch", 0777);
     mkdir("sdmc:/switch/EzFiles", 0777);
-    mkdir("sdmc:/switch/EzFiles/install", 0777);
+    mkdir(folder.c_str(), 0777);
 
-    // Eliminar el antiguo LEEME si existe
-    unlink("sdmc:/switch/EzFiles/install/LEEME - Instrucciones de Instalacion.txt");
-
-    // Limpiar archivos anteriores en la carpeta para no duplicar espacio en la MicroSD (como DBI)
-    DIR* d = opendir("sdmc:/switch/EzFiles/install");
+    DIR* d = opendir(folder.c_str());
     if (d) {
         struct dirent* e;
         while ((e = readdir(d)) != NULL) {
             if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
             if (!strcmp(e->d_name, "PLACE_NSP_NSZ_XCI_OR_ZIP_FILES_HERE")) continue;
-            std::string p = mtpJoin("sdmc:/switch/EzFiles/install", e->d_name);
+            std::string p = mtpJoin(folder, e->d_name);
             unlink(p.c_str());
         }
         closedir(d);
     }
 
-    // Placeholder virtual idéntico a DBI (0 bytes, sin extensión .txt para verse como etiqueta)
-    std::string tagPath = "sdmc:/switch/EzFiles/install/PLACE_NSP_NSZ_XCI_OR_ZIP_FILES_HERE";
+    std::string tagPath = folder + "/PLACE_NSP_NSZ_XCI_OR_ZIP_FILES_HERE";
     FILE* f = fopen(tagPath.c_str(), "wb");
     if (f) fclose(f);
 
     u32 h = getOrRegisterHandle(storage, tagPath, 0, "PLACE_NSP_NSZ_XCI_OR_ZIP_FILES_HERE", false, 0, time(nullptr));
     handles.push_back(h);
+}
+
+inline void mtpScanSaves(u32 storage, std::vector<u32>& handles) {
+    mkdir("sdmc:/switch", 0777);
+    mkdir("sdmc:/switch/EzFiles", 0777);
+    mkdir("sdmc:/switch/EzFiles/saves", 0777);
+
+    std::string saveDir = "sdmc:/switch/EzFiles/saves";
+    if (access("sdmc:/JKSV", F_OK) == 0) {
+        saveDir = "sdmc:/JKSV";
+    }
+
+    handles = mtpScanDirectory(storage, saveDir, 0);
 }
 
 // Escanea los juegos y aplicaciones instalados en la consola (similar a DBI)
@@ -580,15 +618,16 @@ inline std::vector<u8> dsDeviceInfo() {
 }
 
 inline std::vector<u8> dsStorageIDs() {
-    AppConfig& cfg = AppConfig::get();
-    cfg.load();
-    std::vector<u32> sids;
-    if (cfg.mtpShowSD) sids.push_back(STORAGE_SD);
-    if (cfg.mtpShowAlbum) sids.push_back(STORAGE_ALBUM);
-    if (cfg.mtpEnableInstaller) sids.push_back(STORAGE_INSTALL);
-    if (cfg.mtpShowNANDUser) sids.push_back(STORAGE_NAND);
-    sids.push_back(STORAGE_GAMES);
-    if (sids.empty()) sids.push_back(STORAGE_SD);
+    std::vector<u32> sids = {
+        STORAGE_SD,
+        STORAGE_NAND_USER,
+        STORAGE_NAND_SYS,
+        STORAGE_GAMES,
+        STORAGE_INSTALL_SD,
+        STORAGE_INSTALL_NAND,
+        STORAGE_SAVES,
+        STORAGE_ALBUM
+    };
 
     std::vector<u8> v;
     put32(v, (u32)sids.size());
@@ -599,7 +638,7 @@ inline std::vector<u8> dsStorageIDs() {
 inline std::vector<u8> dsStorageInfo(u32 storage_id) {
     struct statvfs sv;
     u64 cap = 0, fr = 0;
-    std::string desc = "1: MicroSD";
+    std::string desc = "1: SD Card";
     std::string name = "sdcard";
 
     if (storage_id == STORAGE_SD) {
@@ -607,35 +646,58 @@ inline std::vector<u8> dsStorageInfo(u32 storage_id) {
             cap = (u64)sv.f_blocks * sv.f_frsize;
             fr = (u64)sv.f_bavail * sv.f_frsize;
         }
-        desc = "1: MicroSD";
+        desc = "1: SD Card";
         name = "sdcard";
-    } else if (storage_id == STORAGE_ALBUM) {
-        if (statvfs("sdmc:/", &sv) == 0) {
-            cap = (u64)sv.f_blocks * sv.f_frsize;
-            fr = (u64)sv.f_bavail * sv.f_frsize;
-        }
-        desc = "2: Album y Capturas";
-        name = "album";
-    } else if (storage_id == STORAGE_INSTALL) {
-        if (statvfs("sdmc:/", &sv) == 0) {
-            cap = (u64)sv.f_blocks * sv.f_frsize;
-            fr = (u64)sv.f_bavail * sv.f_frsize;
-        }
-        desc = "3: Drop NSP/NSZ/XCI";
-        name = "installer";
-    } else if (storage_id == STORAGE_NAND) {
+    } else if (storage_id == STORAGE_NAND_USER) {
         mountNandUser();
         if (statvfs("user:/", &sv) == 0) {
             cap = (u64)sv.f_blocks * sv.f_frsize;
             fr = (u64)sv.f_bavail * sv.f_frsize;
         }
-        desc = "4: Memoria NAND (User)";
-        name = "nand";
+        desc = "2: Nand USER";
+        name = "nand_user";
+    } else if (storage_id == STORAGE_NAND_SYS) {
+        mountNandSys();
+        if (statvfs("system:/", &sv) == 0) {
+            cap = (u64)sv.f_blocks * sv.f_frsize;
+            fr = (u64)sv.f_bavail * sv.f_frsize;
+        }
+        desc = "3: Nand SYSTEM";
+        name = "nand_system";
     } else if (storage_id == STORAGE_GAMES) {
-        desc = "5: Juegos Instalados";
+        desc = "4: Installed games";
         name = "games";
         cap = 64ULL * 1024 * 1024 * 1024;
         fr = 0;
+    } else if (storage_id == STORAGE_INSTALL_SD) {
+        if (statvfs("sdmc:/", &sv) == 0) {
+            cap = (u64)sv.f_blocks * sv.f_frsize;
+            fr = (u64)sv.f_bavail * sv.f_frsize;
+        }
+        desc = "5: SD Card install";
+        name = "install_sd";
+    } else if (storage_id == STORAGE_INSTALL_NAND) {
+        mountNandUser();
+        if (statvfs("user:/", &sv) == 0) {
+            cap = (u64)sv.f_blocks * sv.f_frsize;
+            fr = (u64)sv.f_bavail * sv.f_frsize;
+        }
+        desc = "6: NAND install";
+        name = "install_nand";
+    } else if (storage_id == STORAGE_SAVES) {
+        if (statvfs("sdmc:/", &sv) == 0) {
+            cap = (u64)sv.f_blocks * sv.f_frsize;
+            fr = (u64)sv.f_bavail * sv.f_frsize;
+        }
+        desc = "7: Saves";
+        name = "saves";
+    } else if (storage_id == STORAGE_ALBUM) {
+        if (statvfs("sdmc:/", &sv) == 0) {
+            cap = (u64)sv.f_blocks * sv.f_frsize;
+            fr = (u64)sv.f_bavail * sv.f_frsize;
+        }
+        desc = "8: Album";
+        name = "album";
     }
 
     std::vector<u8> v;
@@ -730,10 +792,11 @@ inline void worker() {
             std::vector<u32> aHs;
             mtpScanAllAlbums(STORAGE_ALBUM, aHs);
             std::vector<u32> iHs;
-            mtpScanInstaller(STORAGE_INSTALL, iHs);
+            mtpScanInstaller(STORAGE_INSTALL_SD, iHs);
+            mtpScanInstaller(STORAGE_INSTALL_NAND, iHs);
 
             mountNandUser();
-            mtpScanDirectory(STORAGE_NAND, "user:/", 0);
+            mtpScanDirectory(STORAGE_NAND_USER, "user:/", 0);
 
             std::vector<u32> gHs;
             mtpScanInstalledGames(STORAGE_GAMES, gHs);
@@ -746,6 +809,7 @@ inline void worker() {
             g_session = 0;
             g_objs.clear();
             unmountNandUser();
+            unmountNandSys();
             mtp_usb::mlog("MTP: PC desconectada");
             sendResponse(tx, MR_OK, nullptr, 0);
             break;
@@ -778,14 +842,24 @@ inline void worker() {
             } else {
                 if (storage == STORAGE_ALBUM) {
                     targetStorage = STORAGE_ALBUM;
-                } else if (storage == STORAGE_INSTALL) {
-                    targetStorage = STORAGE_INSTALL;
-                } else if (storage == STORAGE_NAND) {
+                } else if (storage == STORAGE_INSTALL_SD) {
+                    targetStorage = STORAGE_INSTALL_SD;
+                } else if (storage == STORAGE_INSTALL_NAND) {
+                    targetStorage = STORAGE_INSTALL_NAND;
+                } else if (storage == STORAGE_NAND_USER) {
                     mountNandUser();
                     scanPath = "user:/";
-                    targetStorage = STORAGE_NAND;
+                    targetStorage = STORAGE_NAND_USER;
+                } else if (storage == STORAGE_NAND_SYS) {
+                    mountNandSys();
+                    scanPath = "system:/";
+                    targetStorage = STORAGE_NAND_SYS;
                 } else if (storage == STORAGE_GAMES) {
                     targetStorage = STORAGE_GAMES;
+                } else if (storage == STORAGE_SAVES) {
+                    mkdir("sdmc:/switch/EzFiles/saves", 0777);
+                    scanPath = "sdmc:/switch/EzFiles/saves";
+                    targetStorage = STORAGE_SAVES;
                 } else {
                     scanPath = "sdmc:/";
                     targetStorage = STORAGE_SD;
@@ -804,8 +878,10 @@ inline void worker() {
                     mtpScanAllAlbums(targetStorage, hs);
                 } else if (targetStorage == STORAGE_GAMES && targetParent == 0) {
                     mtpScanInstalledGames(targetStorage, hs);
-                } else if (targetStorage == STORAGE_INSTALL && targetParent == 0) {
+                } else if ((targetStorage == STORAGE_INSTALL_SD || targetStorage == STORAGE_INSTALL_NAND) && targetParent == 0) {
                     mtpScanInstaller(targetStorage, hs);
+                } else if (targetStorage == STORAGE_SAVES && targetParent == 0) {
+                    mtpScanSaves(targetStorage, hs);
                 } else {
                     hs = mtpScanDirectory(targetStorage, scanPath, targetParent);
                 }
@@ -871,14 +947,25 @@ inline void worker() {
 
             std::string parentPath = "sdmc:/";
             if (targetStorage == STORAGE_ALBUM) parentPath = "sdmc:/Nintendo/Album";
-            else if (targetStorage == STORAGE_INSTALL) {
+            else if (targetStorage == STORAGE_INSTALL_SD) {
                 mkdir("sdmc:/switch", 0777);
                 mkdir("sdmc:/switch/EzFiles", 0777);
-                mkdir("sdmc:/switch/EzFiles/install", 0777);
-                parentPath = "sdmc:/switch/EzFiles/install";
-            } else if (targetStorage == STORAGE_NAND) {
+                mkdir("sdmc:/switch/EzFiles/install_sd", 0777);
+                parentPath = "sdmc:/switch/EzFiles/install_sd";
+            } else if (targetStorage == STORAGE_INSTALL_NAND) {
+                mkdir("sdmc:/switch", 0777);
+                mkdir("sdmc:/switch/EzFiles", 0777);
+                mkdir("sdmc:/switch/EzFiles/install_nand", 0777);
+                parentPath = "sdmc:/switch/EzFiles/install_nand";
+            } else if (targetStorage == STORAGE_NAND_USER) {
                 mountNandUser();
                 parentPath = "user:/";
+            } else if (targetStorage == STORAGE_NAND_SYS) {
+                mountNandSys();
+                parentPath = "system:/";
+            } else if (targetStorage == STORAGE_SAVES) {
+                mkdir("sdmc:/switch/EzFiles/saves", 0777);
+                parentPath = "sdmc:/switch/EzFiles/saves";
             }
 
             if (parentH != 0 && parentH != 0xFFFFFFFF) {
@@ -990,7 +1077,7 @@ inline void worker() {
 
             char logMsg[128];
             std::string finalName = g_pendingSendPath.substr(g_pendingSendPath.find_last_of('/') + 1);
-            if (g_pendingSendStorage == STORAGE_INSTALL) {
+            if (g_pendingSendStorage == STORAGE_INSTALL_SD || g_pendingSendStorage == STORAGE_INSTALL_NAND) {
                 snprintf(logMsg, sizeof(logMsg), "Instalador: %s guardado (%.1f MB)",
                          finalName.c_str(), (double)totalReceived / (1024.0 * 1024.0));
                 mtp_usb::mlog(logMsg);

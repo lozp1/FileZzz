@@ -12,44 +12,50 @@
     <brls:Label
         text="Transfiere archivos mediante Wi-Fi desde cualquier cliente FTP (FileZilla, WinSCP)"
         fontSize="15px"
-        textColor="#9CA3AF"
+        textColor="@theme/brls/header/subtitle"
         marginTop="4px" />
 
     <brls:Box
         width="auto"
         height="auto"
-        axis="row"
-        justifyContent="spaceBetween"
-        alignItems="center"
+        axis="column"
         marginTop="20px"
         padding="20px"
         cornerRadius="8px"
-        backgroundColor="#1A1D24">
+        backgroundColor="@theme/brls/sidebar/background">
 
-        <brls:Box axis="column">
+        <brls:Box
+            width="auto"
+            height="auto"
+            axis="row"
+            justifyContent="spaceBetween"
+            alignItems="center">
+
             <brls:Label
                 id="lblFtpStatus"
                 text="Estado: Desactivado"
                 fontSize="22px"
                 textColor="#8B5CF6" />
-            <brls:Label
-                id="lblFtpAddress"
-                text="Direccion: ftp://0.0.0.0:5000"
-                fontSize="16px"
-                textColor="#9CA3AF"
-                marginTop="6px" />
+
+            <brls:Button
+                id="btnToggleFtp"
+                text="Iniciar FTP"
+                width="180px"
+                height="44px" />
         </brls:Box>
 
-        <brls:Button
-            id="btnToggleFtp"
-            text="Iniciar FTP"
-            width="200px"
-            height="50px" />
+        <brls:Label
+            id="lblFtpAddress"
+            text="Direccion: Desconectado"
+            fontSize="16px"
+            textColor="@theme/brls/text_disabled"
+            marginTop="12px" />
+
     </brls:Box>
 
     <brls:Header
         title="Instrucciones de Conexion"
-        marginTop="30px" />
+        marginTop="25px" />
 
     <brls:Box
         width="auto"
@@ -57,20 +63,20 @@
         axis="column"
         padding="15px"
         cornerRadius="8px"
-        backgroundColor="#0F1117">
+        backgroundColor="@theme/brls/background">
         <brls:Label
             text="1. Asegurate de que la Switch y tu PC esten en la misma red Wi-Fi."
-            fontSize="16px"
-            textColor="#D1D5DB" />
+            fontSize="15px"
+            textColor="@theme/brls/text" />
         <brls:Label
             text="2. Abre tu cliente FTP e introduce la IP y el puerto mostrados arriba."
-            fontSize="16px"
-            textColor="#D1D5DB"
+            fontSize="15px"
+            textColor="@theme/brls/text"
             marginTop="8px" />
         <brls:Label
             text="3. Usuario y contrasena: Dejar en blanco o usar modo anonimo."
-            fontSize="16px"
-            textColor="#D1D5DB"
+            fontSize="15px"
+            textColor="@theme/brls/text"
             marginTop="8px" />
     </brls:Box>
 

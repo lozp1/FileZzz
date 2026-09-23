@@ -1,4 +1,5 @@
 <brls:Box
+    id="splashContainer"
     width="auto"
     height="auto"
     axis="column"
@@ -9,22 +10,22 @@
 
     <brls:Image
         id="splashLogo"
-        image="@res/img/ezfiles_logo.jpg"
+        image="@res/img/ezfiles_logo.png"
         width="220px"
         height="220px"
-        cornerRadius="16px" />
+        cornerRadius="28px" />
 
     <brls:Label
         id="splashTitle"
         text="EzFiles"
         fontSize="36px"
-        textColor="#06B6D4"
+        textColor="#38BDF8"
         marginTop="24px" />
 
     <brls:Label
         id="splashSub"
-        text="Iniciando sistema..."
-        fontSize="15px"
+        text="Andromeda Suite"
+        fontSize="16px"
         textColor="#9CA3AF"
         marginTop="8px" />
 

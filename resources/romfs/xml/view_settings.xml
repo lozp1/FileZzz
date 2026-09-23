@@ -12,7 +12,7 @@
     <brls:Label
         text="Configura la apariencia y el comportamiento de la aplicacion"
         fontSize="15px"
-        textColor="#9CA3AF"
+        textColor="@theme/brls/header/subtitle"
         marginTop="4px" />
 
     <brls:ScrollingFrame
@@ -31,12 +31,12 @@
             <brls:DetailCell
                 id="cellTheme"
                 title="Tema visual"
-                detail="Oscuro (Predeterminado)" />
+                detail="Oscuro" />
 
             <brls:DetailCell
                 id="cellLanguage"
                 title="Idioma"
-                detail="Espanol" />
+                detail="Español" />
 
             <brls:Header
                 title="Servicios de Red"
@@ -50,7 +50,7 @@
             <brls:DetailCell
                 id="cellMtpPartitions"
                 title="Particiones USB MTP"
-                detail="8 Unidades (Estilo DBI)" />
+                detail="8 Particiones activas" />
 
         </brls:Box>
     </brls:ScrollingFrame>

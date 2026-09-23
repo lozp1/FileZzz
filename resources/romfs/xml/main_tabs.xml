@@ -1,9 +1,10 @@
 <brls:AppletFrame
+    id="mainAppletFrame"
     iconInterpolation="linear"
     footerHidden="false">
     <brls:TabFrame
         title="EzFiles"
-        icon="@res/img/icon_explorer.png">
+        icon="@res/img/app_logo_clean.png">
 
         <brls:Tab label="Explorador">
             <ExplorerTab />

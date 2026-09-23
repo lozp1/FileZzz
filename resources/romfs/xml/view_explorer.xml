@@ -17,12 +17,12 @@
             id="lblCurrentPath"
             text="sdmc:/"
             fontSize="20px"
-            textColor="#06B6D4" />
+            textColor="#38BDF8" />
         <brls:Label
             id="lblItemCount"
             text="0 elementos"
             fontSize="16px"
-            textColor="#9CA3AF" />
+            textColor="@theme/brls/text_disabled" />
     </brls:Box>
 
     <brls:ScrollingFrame

@@ -158,7 +158,7 @@ public:
                 });
             }
 
-            // Atajo con Boton X de mando Nintendo Switch para menu contextual
+            // Atajo con Boton X de mando Nintendo Switch para menu contextual organico
             cell->registerAction("Opciones", brls::BUTTON_X, [this, fullPath, name, isDir](brls::View*) {
                 showFileActionsDialog(fullPath, name, isDir);
                 return true;
@@ -180,19 +180,44 @@ public:
         prop->open();
     }
 
+    // Menu contextual organico con opciones dispuestas verticalmente
     void showFileActionsDialog(const std::string& fullPath, const std::string& name, bool isDir) {
-        brls::Dialog* d = new brls::Dialog(name);
-        d->addButton("Copiar", [this, fullPath]() {
+        brls::Box* menuBox = new brls::Box();
+        menuBox->setAxis(brls::Axis::COLUMN);
+        menuBox->setWidth(560);
+        menuBox->setPadding(15, 20, 15, 20);
+
+        brls::Header* hdr = new brls::Header();
+        hdr->setTitle(name);
+        menuBox->addView(hdr);
+
+        brls::Dialog* d = new brls::Dialog(menuBox);
+
+        auto addActionRow = [&](const std::string& title, const std::string& detail, std::function<void()> cb) {
+            brls::DetailCell* cell = new brls::DetailCell();
+            cell->setText(title);
+            cell->setDetailText(detail);
+            cell->registerClickAction([d, cb](brls::View*) {
+                d->close();
+                cb();
+                return true;
+            });
+            menuBox->addView(cell);
+        };
+
+        addActionRow("Copiar", "Guardar en portapapeles", [this, fullPath]() {
             g_clipboardPath = fullPath;
             g_clipboardIsCut = false;
             refreshList();
         });
-        d->addButton("Cortar", [this, fullPath]() {
+
+        addActionRow("Cortar", "Mover de ubicacion", [this, fullPath]() {
             g_clipboardPath = fullPath;
             g_clipboardIsCut = true;
             refreshList();
         });
-        d->addButton("Renombrar", [this, fullPath, name]() {
+
+        addActionRow("Renombrar", "Cambiar nombre", [this, fullPath, name]() {
             brls::sync([this, fullPath, name]() {
                 std::string newName = showHorizonKeyboard("Nuevo nombre de archivo", name);
                 if (!newName.empty() && newName != name) {
@@ -202,9 +227,11 @@ public:
                 }
             });
         });
-        d->addButton("Eliminar", [this, fullPath, name, isDir]() {
+
+        addActionRow("Eliminar", "Borrar permanentemente", [this, fullPath, name, isDir]() {
             brls::sync([this, fullPath, name, isDir]() {
-                brls::Dialog* confirm = new brls::Dialog("Seguro que deseas eliminar '" + name + "'?");
+                brls::Dialog* confirm = new brls::Dialog("¿Seguro que deseas eliminar '" + name + "'?");
+                confirm->addButton("Cancelar", []() {});
                 confirm->addButton("Eliminar", [this, fullPath, isDir]() {
                     if (isDir) {
                         mtp_ops::mtpDelRec(fullPath);
@@ -213,11 +240,11 @@ public:
                     }
                     refreshList();
                 });
-                confirm->addButton("Cancelar", []() {});
                 confirm->open();
             });
         });
-        d->addButton("Propiedades", [this, fullPath, name]() {
+
+        addActionRow("Propiedades", "Ver informacion tecnica", [this, fullPath, name]() {
             brls::sync([this, fullPath, name]() {
                 struct stat st;
                 u64 sz = 0;
@@ -225,6 +252,7 @@ public:
                 showFileProperties(fullPath, name, sz);
             });
         });
+
         d->addButton("Cancelar", []() {});
         d->open();
     }
@@ -278,15 +306,15 @@ public:
     void updateUIState(bool running) {
         if (lblMtpStatus) {
             if (running) {
-                lblMtpStatus->setText("Estado: Servidor Activo (0x057E:0x201D)");
+                lblMtpStatus->setText("Estado: Servidor MTP Activo");
                 lblMtpStatus->setTextColor(nvgRGB(16, 185, 129));
             } else {
-                lblMtpStatus->setText("Estado: Detenido / En Espera");
+                lblMtpStatus->setText("Estado: En espera de conexion USB");
                 lblMtpStatus->setTextColor(nvgRGB(156, 163, 175));
             }
         }
         if (btnToggleMtp) {
-            btnToggleMtp->setText(running ? "Detener MTP" : "Activar MTP");
+            btnToggleMtp->setText(running ? "Detener MTP" : "Iniciar MTP");
         }
     }
 
@@ -303,7 +331,7 @@ public:
                     mtp_ops::g_telemetry.isUpload ? "Recibiendo" : "Enviando",
                     mtp_ops::g_telemetry.filename, pct, (float)mtp_ops::g_telemetry.speedMBs);
                 lblMtpInfo->setText(info);
-                lblMtpInfo->setTextColor(nvgRGB(6, 182, 212));
+                lblMtpInfo->setTextColor(nvgRGB(56, 189, 248)); // Azul cielo de alto contraste
             } else {
                 lblMtpInfo->setText("8 Particiones: SD, User, System, Juegos, Install SD/NAND, Saves, Album");
                 lblMtpInfo->setTextColor(nvgRGB(156, 163, 175));
@@ -334,6 +362,8 @@ public:
                     ftp_server::stop();
                     updateFtpState(false);
                 } else {
+                    int port = AppConfig::get().ftpPort > 0 ? AppConfig::get().ftpPort : 5000;
+                    ftp_server::g_listenPort = port;
                     ftp_server::start();
                     updateFtpState(true);
                 }
@@ -354,7 +384,8 @@ public:
         }
         if (lblFtpAddress) {
             std::string ip = ftp_server::getRealIp();
-            lblFtpAddress->setText(running ? ("Direccion: ftp://" + ip + ":5000") : "Direccion: Desconectado");
+            int port = AppConfig::get().ftpPort > 0 ? AppConfig::get().ftpPort : 5000;
+            lblFtpAddress->setText(running ? ("Direccion: ftp://" + ip + ":" + std::to_string(port)) : "Direccion: Desconectado");
         }
         if (btnToggleFtp) {
             btnToggleFtp->setText(running ? "Detener FTP" : "Iniciar FTP");
@@ -380,37 +411,97 @@ public:
 
         if (cellTheme) {
             bool isDark = (brls::Application::getPlatform()->getThemeVariant() == brls::ThemeVariant::DARK);
-            cellTheme->setDetailText(isDark ? "Oscuro (Predeterminado)" : "Claro");
+            cellTheme->setDetailText(isDark ? "Oscuro" : "Claro");
             cellTheme->registerClickAction([this](brls::View*) {
                 bool isDark = (brls::Application::getPlatform()->getThemeVariant() == brls::ThemeVariant::DARK);
                 brls::Application::getPlatform()->setThemeVariant(isDark ? brls::ThemeVariant::LIGHT : brls::ThemeVariant::DARK);
-                cellTheme->setDetailText(isDark ? "Claro" : "Oscuro (Predeterminado)");
+                cellTheme->setDetailText(isDark ? "Claro" : "Oscuro");
                 return true;
             });
         }
 
         if (cellLanguage) {
-            cellLanguage->setDetailText("Espanol");
+            cellLanguage->setDetailText("Español");
             cellLanguage->registerClickAction([this](brls::View*) {
-                brls::Dialog* d = new brls::Dialog("Seleccionar idioma");
-                d->addButton("Espanol (Predeterminado)", [this]() {
-                    cellLanguage->setDetailText("Espanol");
-                });
-                d->addButton("English", [this]() {
-                    cellLanguage->setDetailText("English");
-                });
-                d->open();
+                openLanguageSelector();
                 return true;
             });
         }
 
         if (cellFtpPort) {
-            cellFtpPort->setDetailText("5000");
+            int curPort = AppConfig::get().ftpPort > 0 ? AppConfig::get().ftpPort : 5000;
+            cellFtpPort->setDetailText(std::to_string(curPort));
+            cellFtpPort->registerClickAction([this](brls::View*) {
+                int port = AppConfig::get().ftpPort > 0 ? AppConfig::get().ftpPort : 5000;
+                std::string res = showHorizonKeyboard("Puerto FTP (1024-65535)", std::to_string(port));
+                if (!res.empty()) {
+                    int p = atoi(res.c_str());
+                    if (p >= 1024 && p <= 65535) {
+                        AppConfig::get().ftpPort = p;
+                        AppConfig::get().save();
+                        cellFtpPort->setDetailText(std::to_string(p));
+                    }
+                }
+                return true;
+            });
         }
 
         if (cellMtpPartitions) {
-            cellMtpPartitions->setDetailText("8 Unidades (Estilo DBI)");
+            cellMtpPartitions->setDetailText("8 Particiones activas");
         }
+    }
+
+    void openLanguageSelector() {
+        brls::Box* container = new brls::Box();
+        container->setAxis(brls::Axis::COLUMN);
+        container->setWidth(560);
+        container->setPadding(15, 20, 15, 20);
+
+        brls::Header* hdr = new brls::Header();
+        hdr->setTitle("Seleccionar Idioma");
+        container->addView(hdr);
+
+        brls::ScrollingFrame* scroll = new brls::ScrollingFrame();
+        scroll->setHeight(360);
+        scroll->setWidth(520);
+
+        brls::Box* list = new brls::Box();
+        list->setAxis(brls::Axis::COLUMN);
+
+        brls::Dialog* d = new brls::Dialog(container);
+
+        struct LangOpt { std::string name; std::string badge; };
+        std::vector<LangOpt> langs = {
+            { "Español", "[ES]" },
+            { "English", "[EN]" },
+            { "Português", "[PT]" },
+            { "Français", "[FR]" },
+            { "Deutsch", "[DE]" },
+            { "Italiano", "[IT]" },
+            { "Русский", "[RU]" },
+            { "Nederlands", "[NL]" },
+            { "Türkçe", "[TR]" },
+            { "Runasimi (Quechua)", "[QU]" },
+            { "Maya K'iche'", "[MYN]" }
+        };
+
+        for (const auto& l : langs) {
+            brls::DetailCell* cell = new brls::DetailCell();
+            cell->setText(l.name);
+            cell->setDetailText(l.badge);
+            cell->registerClickAction([this, d, l](brls::View*) {
+                d->close();
+                cellLanguage->setDetailText(l.name);
+                return true;
+            });
+            list->addView(cell);
+        }
+
+        scroll->setContentView(list);
+        container->addView(scroll);
+
+        d->addButton("Cancelar", []() {});
+        d->open();
     }
 
     static brls::View* create() {
@@ -436,19 +527,13 @@ public:
     }
 };
 
-// --- Actividad Principal ---
-class MainActivity : public brls::Activity {
+// --- Vista de Inicio / Splash (liberada tras carga) ---
+class SplashView : public brls::Box {
 public:
-    CONTENT_FROM_XML_FILE("romfs:/xml/main_tabs.xml");
-};
+    SplashView() {
+        this->inflateFromXMLFile("romfs:/xml/view_splash.xml");
 
-// --- Pantalla de Inicio / Splash Screen ---
-class SplashActivity : public brls::Activity {
-public:
-    CONTENT_FROM_XML_FILE("romfs:/xml/view_splash.xml");
-
-    SplashActivity() {
-        // Carga opcional de logotipo personalizado desde la tarjeta SD si existe
+        // Carga opcional de logotipo personalizado desde SD si existe
         if (access("sdmc:/switch/EzFiles/logo.png", F_OK) == 0) {
             brls::Image* img = dynamic_cast<brls::Image*>(this->getView("splashLogo"));
             if (img) img->setImageFromFile("sdmc:/switch/EzFiles/logo.png");
@@ -456,12 +541,26 @@ public:
             brls::Image* img = dynamic_cast<brls::Image*>(this->getView("splashLogo"));
             if (img) img->setImageFromFile("sdmc:/switch/EzFiles/splash.png");
         }
+    }
+};
 
-        splashTimer.setCallback([this]() {
-            splashTimer.stop();
-            brls::Application::pushActivity(new MainActivity(), brls::TransitionAnimation::FADE);
-        });
-        splashTimer.start(1200); // 1.2 segundos con transicion suave
+// --- Actividad Principal (con soporte para Splash sin dejar rastro en la pila) ---
+class MainActivity : public brls::Activity {
+public:
+    CONTENT_FROM_XML_FILE("romfs:/xml/main_tabs.xml");
+
+    MainActivity() {
+        brls::AppletFrame* applet = dynamic_cast<brls::AppletFrame*>(this->getContentView());
+        if (applet) {
+            SplashView* splash = new SplashView();
+            applet->pushContentView(splash);
+
+            splashTimer.setCallback([applet, this]() {
+                splashTimer.stop();
+                applet->popContentView([]() {});
+            });
+            splashTimer.start(1200); // 1.2 segundos y libera el splash permanentemente
+        }
     }
 
 private:
@@ -502,7 +601,8 @@ int main(int argc, char* argv[]) {
     brls::Application::registerXMLView("AboutTab", AboutTab::create);
 
     try {
-        brls::Application::pushActivity(new SplashActivity());
+        // MainActivity es la UNICA actividad raiz en la pila
+        brls::Application::pushActivity(new MainActivity());
         while (brls::Application::mainLoop());
     } catch (const std::exception& e) {
         brls::Logger::error("Excepcion interceptada: {}", e.what());

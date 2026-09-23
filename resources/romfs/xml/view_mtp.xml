@@ -12,44 +12,50 @@
     <brls:Label
         text="Conecta la consola a tu PC con un cable USB-C de datos"
         fontSize="15px"
-        textColor="#9CA3AF"
+        textColor="@theme/brls/header/subtitle"
         marginTop="4px" />
 
     <brls:Box
         width="auto"
         height="auto"
-        axis="row"
-        justifyContent="spaceBetween"
-        alignItems="center"
+        axis="column"
         marginTop="20px"
         padding="20px"
         cornerRadius="8px"
-        backgroundColor="#1A1D24">
+        backgroundColor="@theme/brls/sidebar/background">
 
-        <brls:Box axis="column">
+        <brls:Box
+            width="auto"
+            height="auto"
+            axis="row"
+            justifyContent="spaceBetween"
+            alignItems="center">
+
             <brls:Label
                 id="lblMtpStatus"
-                text="Estado: Esperando conexion..."
+                text="Estado: En espera de conexion USB"
                 fontSize="22px"
                 textColor="#10B981" />
-            <brls:Label
-                id="lblMtpInfo"
-                text="8 Particiones: SD, User, System, Juegos, Install SD/NAND, Saves, Album"
-                fontSize="16px"
-                textColor="#9CA3AF"
-                marginTop="6px" />
+
+            <brls:Button
+                id="btnToggleMtp"
+                text="Detener MTP"
+                width="180px"
+                height="44px" />
         </brls:Box>
 
-        <brls:Button
-            id="btnToggleMtp"
-            text="Detener MTP"
-            width="200px"
-            height="50px" />
+        <brls:Label
+            id="lblMtpInfo"
+            text="8 Particiones: SD, User, System, Juegos, Install SD/NAND, Saves, Album"
+            fontSize="16px"
+            textColor="@theme/brls/text_disabled"
+            marginTop="12px" />
+
     </brls:Box>
 
     <brls:Header
         title="Registro de Actividad"
-        marginTop="30px" />
+        marginTop="25px" />
 
     <brls:Box
         id="boxMtpLogs"
@@ -58,12 +64,12 @@
         axis="column"
         padding="15px"
         cornerRadius="8px"
-        backgroundColor="#0F1117">
+        backgroundColor="@theme/brls/background">
         <brls:Label
             id="lblLogContent"
             text="[MTP] Servicio iniciado y listo para recibir conexiones."
             fontSize="14px"
-            textColor="#D1D5DB" />
+            textColor="@theme/brls/text" />
     </brls:Box>
 
 </brls:Box>

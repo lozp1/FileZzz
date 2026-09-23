@@ -1,5 +1,6 @@
 # Build output (devkitPro)
 build/
+build_ezfiles/
 *.o
 *.d
 *.elf

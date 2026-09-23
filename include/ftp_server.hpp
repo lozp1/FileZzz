@@ -22,6 +22,7 @@
 namespace ftp_server {
 
 inline std::atomic<bool> g_running(false);
+inline bool running() { return g_running.load(); }
 inline std::thread g_serverThread;
 inline int g_listenPort = 5000;
 inline int g_serverSock = -1;

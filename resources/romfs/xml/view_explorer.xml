@@ -26,10 +26,14 @@
             textColor="#9CA3AF" />
     </brls:Box>
 
-    <brls:List
-        id="listExplorerFiles"
+    <brls:ScrollingFrame
         width="auto"
-        height="auto"
-        marginTop="15px" />
-
+        height="500px"
+        marginTop="15px">
+        <brls:Box
+            id="boxFiles"
+            width="auto"
+            height="auto"
+            axis="column" />
+    </brls:ScrollingFrame>
 </brls:Box>

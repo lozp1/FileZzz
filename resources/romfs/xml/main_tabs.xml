@@ -1,28 +1,21 @@
-<brls:TabFrame
-    xmlns:brls="http://borealis.org/borealis"
-    width="auto"
-    height="auto"
-    title="EzFiles">
+<brls:AppletFrame
+    iconInterpolation="linear"
+    footerHidden="false">
+    <brls:TabFrame
+        title="EzFiles"
+        icon="@res/img/icon_explorer.png">
 
-    <brls:Tab
-        id="tabExplorer"
-        title="Explorador"
-        icon="romfs:/img/icon_explorer.png">
-        <xml file="romfs:/xml/view_explorer.xml" />
-    </brls:Tab>
+        <brls:Tab label="Explorador">
+            <ExplorerTab />
+        </brls:Tab>
 
-    <brls:Tab
-        id="tabMtp"
-        title="USB MTP"
-        icon="romfs:/img/icon_usb.png">
-        <xml file="romfs:/xml/view_mtp.xml" />
-    </brls:Tab>
+        <brls:Tab label="USB MTP">
+            <MtpTab />
+        </brls:Tab>
 
-    <brls:Tab
-        id="tabFtp"
-        title="Servidor FTP"
-        icon="romfs:/img/icon_ftp.png">
-        <xml file="romfs:/xml/view_ftp.xml" />
-    </brls:Tab>
+        <brls:Tab label="Servidor FTP">
+            <FtpTab />
+        </brls:Tab>
 
-</brls:TabFrame>
+    </brls:TabFrame>
+</brls:AppletFrame>

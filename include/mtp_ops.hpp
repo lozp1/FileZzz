@@ -474,10 +474,8 @@ inline void worker() {
         case OP_GetNumObjects:
         case OP_GetObjectHandles: {
             u32 parent = len >= 24 ? P(2) : 0xFFFFFFFF;
-            u16 fmt    = len >= 20 ? (u16)P(1) : 0;
-
-            std::string scanPath = "sdmc:/";
             u32 targetParent = 0;
+            std::string scanPath = "sdmc:/";
             if (parent != 0 && parent != 0xFFFFFFFF) {
                 const MtpObj* po = mtpFind(parent);
                 if (po && po->dir) {
@@ -486,8 +484,15 @@ inline void worker() {
                 }
             }
 
-            // Escanea instantáneamente en demanda ÚNICAMENTE la carpeta pedida
-            std::vector<u32> hs = mtpScanDirectory(scanPath, targetParent);
+            // Buscar en caché si la carpeta ya fue escaneada
+            std::vector<u32> hs;
+            for (auto& o : g_objs) {
+                if (o.parent == targetParent) hs.push_back(o.handle);
+            }
+            // Si es la primera vez que se accede a esta carpeta, escanearla en disco
+            if (hs.empty()) {
+                hs = mtpScanDirectory(scanPath, targetParent);
+            }
 
             if (code == OP_GetNumObjects) {
                 u32 n = (u32)hs.size();
@@ -584,36 +589,37 @@ inline void worker() {
         }
         case OP_MtpGetObjPropList: {
             u32 handle = P(0);
-            u16 prop   = (u16)P(2);
-            std::vector<const MtpObj*> targets;
-            if (handle == 0 || handle == 0xFFFFFFFF) {
-                if (g_objs.empty()) mtpScanDirectory("sdmc:/", 0);
-                for (auto& obj : g_objs) targets.push_back(&obj);
-            } else {
-                const MtpObj* o = mtpFind(handle);
-                if (o) targets.push_back(o);
+            u32 depth  = len >= 32 ? P(4) : 0;
+            // Si Windows solicita profundidad recursiva o lote de todos los objetos,
+            // devolver SpecificationByDepthUnsupported (0xA808) igual que Atmosphère Haze.
+            // Esto instruye a Windows a usar GetObjectInfo (0x1008) por objeto, que es instantáneo y no se cuelga.
+            if (depth != 0 || handle == 0 || handle == 0xFFFFFFFF) {
+                sendResponse(tx, 0xA808, nullptr, 0);
+                break;
             }
 
-            std::vector<u8> d;
-            // Construir lista de propiedades
+            const MtpObj* o = mtpFind(handle);
+            if (!o) { sendResponse(tx, MR_InvalidObjectHandle, nullptr, 0); break; }
+
+            u16 prop = (u16)P(2);
             std::vector<u8> elemBuf;
             u32 count = 0;
-            for (auto* obj : targets) {
-                auto emit = [&](u16 pcode, u16 ptype, auto fn) {
-                    if (prop != 0 && prop != 0xFFFF && prop != pcode) return;
-                    put32(elemBuf, obj->handle);
-                    put16(elemBuf, pcode);
-                    put16(elemBuf, ptype);
-                    fn(elemBuf);
-                    count++;
-                };
-                emit(PROP_StorageId, TYPE_U32, [](std::vector<u8>& b) { put32(b, MTP_STORAGE); });
-                emit(PROP_ObjectFormat, TYPE_U16, [&](std::vector<u8>& b) { put16(b, obj->dir ? F_Association : F_Undefined); });
-                emit(PROP_ObjectCompressedSize, TYPE_U64, [&](std::vector<u8>& b) { put64(b, obj->size); });
-                emit(PROP_ParentObject, TYPE_U32, [&](std::vector<u8>& b) { put32(b, obj->parent); });
-                emit(PROP_ObjectFileName, TYPE_String, [&](std::vector<u8>& b) { putStr(b, obj->name.c_str()); });
-                emit(PROP_PersistentGUID, TYPE_U128, [&](std::vector<u8>& b) { put64(b, obj->handle); put64(b, 0); });
-            }
+            auto emit = [&](u16 pcode, u16 ptype, auto fn) {
+                if (prop != 0 && prop != 0xFFFF && prop != pcode) return;
+                put32(elemBuf, o->handle);
+                put16(elemBuf, pcode);
+                put16(elemBuf, ptype);
+                fn(elemBuf);
+                count++;
+            };
+            emit(PROP_StorageId, TYPE_U32, [](std::vector<u8>& b) { put32(b, MTP_STORAGE); });
+            emit(PROP_ObjectFormat, TYPE_U16, [&](std::vector<u8>& b) { put16(b, o->dir ? F_Association : F_Undefined); });
+            emit(PROP_ObjectCompressedSize, TYPE_U64, [&](std::vector<u8>& b) { put64(b, o->size); });
+            emit(PROP_ParentObject, TYPE_U32, [&](std::vector<u8>& b) { put32(b, o->parent); });
+            emit(PROP_ObjectFileName, TYPE_String, [&](std::vector<u8>& b) { putStr(b, o->name.c_str()); });
+            emit(PROP_PersistentGUID, TYPE_U128, [&](std::vector<u8>& b) { put64(b, o->handle); put64(b, 0); });
+
+            std::vector<u8> d;
             put32(d, count);
             d.insert(d.end(), elemBuf.begin(), elemBuf.end());
             if (sendData(code, tx, d)) sendResponse(tx, MR_OK, nullptr, 0);

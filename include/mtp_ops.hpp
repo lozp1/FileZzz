@@ -322,32 +322,35 @@ inline void mtpScanAllAlbums(u32 storage, std::vector<u32>& handles) {
     mtpScanAlbumRecursive(storage, "user:/Album", handles);
 }
 
-// Crea las instrucciones de texto visibles dentro de la partición de instalación
-inline void ensureInstallerReadme() {
+// Prepara la partición virtual de instalación al estilo DBI (placeholder sin extensión y limpieza de temporales)
+inline void mtpScanInstaller(u32 storage, std::vector<u32>& handles) {
     mkdir("sdmc:/switch", 0777);
     mkdir("sdmc:/switch/EzFiles", 0777);
     mkdir("sdmc:/switch/EzFiles/install", 0777);
 
-    const char* readmePath = "sdmc:/switch/EzFiles/install/LEEME - Instrucciones de Instalacion.txt";
-    FILE* f = fopen(readmePath, "wb");
-    if (f) {
-        const char* text = 
-            "======================================================================\r\n"
-            "  EzFiles - Instalador Directo de Juegos (Drop NSP / NSZ / XCI)\r\n"
-            "======================================================================\r\n\r\n"
-            "COMO INSTALAR JUEGOS EN TU CONSOLA:\r\n"
-            "1. Arrastra y suelta directamente tus archivos de juego aqui (.nsp, .nsz, .xci).\r\n"
-            "2. La transferencia comenzara por USB a maxima velocidad (35 - 45 MB/s).\r\n"
-            "3. En la pantalla de tu Switch veras la notificacion en tiempo real.\r\n"
-            "4. Los archivos quedan listos en tu tarjeta SD (sdmc:/switch/EzFiles/install/).\r\n\r\n"
-            "Formatos compatibles:\r\n"
-            " - .nsp (Nintendo Submission Package)\r\n"
-            " - .nsz (NSP Comprimido con zstandard)\r\n"
-            " - .xci (GameCard Dump completo)\r\n\r\n"
-            "======================================================================\r\n";
-        fwrite(text, 1, strlen(text), f);
-        fclose(f);
+    // Eliminar el antiguo LEEME si existe
+    unlink("sdmc:/switch/EzFiles/install/LEEME - Instrucciones de Instalacion.txt");
+
+    // Limpiar archivos anteriores en la carpeta para no duplicar espacio en la MicroSD (como DBI)
+    DIR* d = opendir("sdmc:/switch/EzFiles/install");
+    if (d) {
+        struct dirent* e;
+        while ((e = readdir(d)) != NULL) {
+            if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+            if (!strcmp(e->d_name, "PLACE_NSP_NSZ_XCI_OR_ZIP_FILES_HERE")) continue;
+            std::string p = mtpJoin("sdmc:/switch/EzFiles/install", e->d_name);
+            unlink(p.c_str());
+        }
+        closedir(d);
     }
+
+    // Placeholder virtual idéntico a DBI (0 bytes, sin extensión .txt para verse como etiqueta)
+    std::string tagPath = "sdmc:/switch/EzFiles/install/PLACE_NSP_NSZ_XCI_OR_ZIP_FILES_HERE";
+    FILE* f = fopen(tagPath.c_str(), "wb");
+    if (f) fclose(f);
+
+    u32 h = getOrRegisterHandle(storage, tagPath, 0, "PLACE_NSP_NSZ_XCI_OR_ZIP_FILES_HERE", false, 0, time(nullptr));
+    handles.push_back(h);
 }
 
 // Escanea los juegos y aplicaciones instalados en la consola (similar a DBI)
@@ -673,9 +676,8 @@ inline void worker() {
             }
             std::vector<u32> aHs;
             mtpScanAllAlbums(STORAGE_ALBUM, aHs);
-
-            ensureInstallerReadme();
-            mtpScanDirectory(STORAGE_INSTALL, "sdmc:/switch/EzFiles/install", 0);
+            std::vector<u32> iHs;
+            mtpScanInstaller(STORAGE_INSTALL, iHs);
 
             mountNandUser();
             mtpScanDirectory(STORAGE_NAND, "user:/", 0);
@@ -724,8 +726,6 @@ inline void worker() {
                 if (storage == STORAGE_ALBUM) {
                     targetStorage = STORAGE_ALBUM;
                 } else if (storage == STORAGE_INSTALL) {
-                    ensureInstallerReadme();
-                    scanPath = "sdmc:/switch/EzFiles/install";
                     targetStorage = STORAGE_INSTALL;
                 } else if (storage == STORAGE_NAND) {
                     mountNandUser();
@@ -751,6 +751,8 @@ inline void worker() {
                     mtpScanAllAlbums(targetStorage, hs);
                 } else if (targetStorage == STORAGE_GAMES && targetParent == 0) {
                     mtpScanInstalledGames(targetStorage, hs);
+                } else if (targetStorage == STORAGE_INSTALL && targetParent == 0) {
+                    mtpScanInstaller(targetStorage, hs);
                 } else {
                     hs = mtpScanDirectory(targetStorage, scanPath, targetParent);
                 }

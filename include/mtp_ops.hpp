@@ -248,31 +248,67 @@ inline bool sendResponse(u32 tx, u16 code, const u32* params, int nparams) {
 }
 
 inline bool sendData(u16 code, u32 tx, const std::vector<u8>& payload) {
-    std::vector<u8> h;
-    put32(h, 12 + (u32)payload.size()); put16(h, T_Data); put16(h, code); put32(h, tx);
-    if (!epWrite(g_epIn, h.data(), h.size())) return false;
-    if (!payload.empty() && !epWrite(g_epIn, payload.data(), payload.size())) return false;
-    return true;
+    std::vector<u8> packet;
+    packet.reserve(12 + payload.size());
+    put32(packet, 12 + (u32)payload.size());
+    put16(packet, T_Data);
+    put16(packet, code);
+    put32(packet, tx);
+    packet.insert(packet.end(), payload.begin(), payload.end());
+    bool ok = epWrite(g_epIn, packet.data(), packet.size());
+    if (ok && (packet.size() % 512) == 0) {
+        u8 z = 0;
+        epWrite(g_epIn, &z, 0); // ZLT requerido cuando el paquete es múltiplo de 512
+    }
+    return ok;
 }
 
 inline bool sendFileData(u16 code, u32 tx, const std::string& path, u64 size) {
-    u32 hdrSize = size > 0xFFFFFFFFULL ? 0xFFFFFFFFUL : (u32)size;
-    std::vector<u8> h;
-    put32(h, 12 + hdrSize); put16(h, T_Data); put16(h, code); put32(h, tx);
-    if (!epWrite(g_epIn, h.data(), h.size())) return false;
     FILE* f = fopen(path.c_str(), "rb");
     if (!f) return false;
+
+    u32 hdrSize = size > 0xFFFFFFFFULL ? 0xFFFFFFFFUL : (u32)size;
+    u64 totalSize = 12 + (u64)hdrSize;
+
+    // Buffer de 64 KB para transferencias rápidas
     std::vector<u8> buf(65536);
-    u64 left = size;
+    // Escribir cabecera de 12 bytes dentro del mismo búfer
+    buf[0]  = (u8)(totalSize);
+    buf[1]  = (u8)(totalSize >> 8);
+    buf[2]  = (u8)(totalSize >> 16);
+    buf[3]  = (u8)(totalSize >> 24);
+    buf[4]  = (u8)(T_Data);
+    buf[5]  = (u8)(T_Data >> 8);
+    buf[6]  = (u8)(code);
+    buf[7]  = (u8)(code >> 8);
+    buf[8]  = (u8)(tx);
+    buf[9]  = (u8)(tx >> 8);
+    buf[10] = (u8)(tx >> 16);
+    buf[11] = (u8)(tx >> 24);
+
+    size_t firstChunk = (size_t)(buf.size() - 12);
+    if ((u64)firstChunk > size) firstChunk = (size_t)size;
+    size_t got = fread(buf.data() + 12, 1, firstChunk, f);
+    if (firstChunk > 0 && got != firstChunk) { fclose(f); return false; }
+
+    // Enviar primer paquete (cabecera + primeros datos juntos sin short-packet prematuro)
+    if (!epWrite(g_epIn, buf.data(), 12 + got)) { fclose(f); return false; }
+
+    u64 left = size - got;
     bool ok = true;
     while (left > 0 && g_run) {
         size_t want = left > buf.size() ? buf.size() : (size_t)left;
-        size_t got = fread(buf.data(), 1, want, f);
-        if (got == 0) { ok = false; break; }
-        if (!epWrite(g_epIn, buf.data(), got)) { ok = false; break; }
-        left -= got;
+        size_t n = fread(buf.data(), 1, want, f);
+        if (n == 0) { ok = false; break; }
+        if (!epWrite(g_epIn, buf.data(), n)) { ok = false; break; }
+        left -= n;
     }
     fclose(f);
+
+    if (ok && (totalSize % 512) == 0) {
+        u8 z = 0;
+        epWrite(g_epIn, &z, 0); // ZLT
+    }
     return ok && left == 0;
 }
 

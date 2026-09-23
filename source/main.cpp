@@ -1245,7 +1245,7 @@ int main(int argc, char* argv[]) {
                 }
             }
             else if (currentScreen == SCREEN_MTP) {
-                std::string mtpSt = mtp_ops::running() ? "MTP Server is RUNNING (0x0955:0x7321)"
+                std::string mtpSt = mtp_ops::running() ? "MTP Server is RUNNING (0x057E:0x201D)"
                     : (mtp_usb::g_ready ? "MTP USB Ready - Press [A] to Start" : "MTP Server is STOPPED");
                 renderText(renderer, fontJet, mtpSt.c_str(), 12, dbiY + rowH*1 + 4, mtp_ops::running() ? Green : W);
                 renderText(renderer, fontJet, mtp_ops::running() ? "Press [A] to Stop MTP" : "Press [A] to Start MTP", 12, dbiY + rowH*2 + 4, W);
@@ -1669,7 +1669,7 @@ int main(int argc, char* argv[]) {
                 SDL_RenderCopy(renderer, icoUsb, NULL, &uDst);
             }
 
-            renderText(renderer, fontTitle, mtp_ops::running() ? "ESTADO: SERVIDOR ACTIVO (0x0955:0x7321)" : "ESTADO: EN ESPERA",
+            renderText(renderer, fontTitle, mtp_ops::running() ? "ESTADO: SERVIDOR ACTIVO (0x057E:0x201D)" : "ESTADO: EN ESPERA",
                        cX + 80, cY + 16, mtp_ops::running() ? tc.AccentEmerald : tc.TextSecondary);
 
             renderText(renderer, fontBody,

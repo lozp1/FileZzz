@@ -16,6 +16,7 @@
 #include <cstring>
 #include <cstdio>
 #include <ctime>
+#include <chrono>
 #include <unistd.h>
 
 namespace mtp_ops {
@@ -88,6 +89,39 @@ enum { F_Undefined = 0x3000, F_Association = 0x3001 };
 inline std::atomic<bool> g_run(false);
 inline std::atomic<bool> g_active(false);
 inline std::thread g_thr;
+
+struct TransferTelemetry {
+    std::atomic<bool> active{false};
+    std::atomic<bool> isUpload{false}; // true = PC -> Switch, false = Switch -> PC
+    char filename[128]{0};
+    std::atomic<u64> totalBytes{0};
+    std::atomic<u64> transferredBytes{0};
+    std::atomic<float> speedMBs{0.0f};
+    std::atomic<int> etaSeconds{0};
+
+    void start(const std::string& name, u64 total, bool upload) {
+        strncpy(filename, name.c_str(), sizeof(filename) - 1);
+        filename[sizeof(filename) - 1] = '\0';
+        totalBytes = total;
+        transferredBytes = 0;
+        speedMBs = 0.0f;
+        etaSeconds = 0;
+        isUpload = upload;
+        active = true;
+    }
+
+    void update(u64 currentBytes, float speed, int eta) {
+        transferredBytes = currentBytes;
+        speedMBs = speed;
+        etaSeconds = eta;
+    }
+
+    void stop() {
+        active = false;
+    }
+};
+
+inline TransferTelemetry g_telemetry;
 
 inline UsbDsEndpoint* g_epIn = nullptr;
 inline UsbDsEndpoint* g_epOut = nullptr;
@@ -442,6 +476,9 @@ inline bool sendFileData(u16 code, u32 tx, const std::string& path, u64 size) {
     FILE* f = fopen(path.c_str(), "rb");
     if (!f) return false;
 
+    std::string fname = path.substr(path.find_last_of('/') + 1);
+    g_telemetry.start(fname, size, false);
+
     u32 hdrSize = size > 0xFFFFFFFFULL ? 0xFFFFFFFFUL : (u32)size;
     u64 totalSize = 12 + (u64)hdrSize;
 
@@ -464,12 +501,16 @@ inline bool sendFileData(u16 code, u32 tx, const std::string& path, u64 size) {
     size_t firstChunk = (size_t)(buf.size() - 12);
     if ((u64)firstChunk > size) firstChunk = (size_t)size;
     size_t got = fread(buf.data() + 12, 1, firstChunk, f);
-    if (firstChunk > 0 && got != firstChunk) { fclose(f); return false; }
+    if (firstChunk > 0 && got != firstChunk) { fclose(f); g_telemetry.stop(); return false; }
 
     // Enviar primer paquete (cabecera + primeros datos juntos sin short-packet prematuro)
-    if (!epWrite(g_epIn, buf.data(), 12 + got)) { fclose(f); return false; }
+    if (!epWrite(g_epIn, buf.data(), 12 + got)) { fclose(f); g_telemetry.stop(); return false; }
 
     u64 left = size - got;
+    u64 transferred = got;
+    auto tLast = std::chrono::steady_clock::now();
+    u64 bytesLast = transferred;
+
     bool ok = true;
     while (left > 0 && g_run) {
         size_t want = left > buf.size() ? buf.size() : (size_t)left;
@@ -477,8 +518,20 @@ inline bool sendFileData(u16 code, u32 tx, const std::string& path, u64 size) {
         if (n == 0) { ok = false; break; }
         if (!epWrite(g_epIn, buf.data(), n)) { ok = false; break; }
         left -= n;
+        transferred += n;
+
+        auto now = std::chrono::steady_clock::now();
+        double dt = std::chrono::duration<double>(now - tLast).count();
+        if (dt >= 0.15) {
+            double spd = (double)(transferred - bytesLast) / (dt * 1024.0 * 1024.0);
+            int eta = (spd > 0.05) ? (int)((double)(size - transferred) / (spd * 1024.0 * 1024.0)) : 0;
+            g_telemetry.update(transferred, (float)spd, eta);
+            tLast = now;
+            bytesLast = transferred;
+        }
     }
     fclose(f);
+    g_telemetry.stop();
 
     if (ok && (totalSize % 512) == 0) {
         u8 z = 0;
@@ -884,6 +937,11 @@ inline void worker() {
             u64 totalExpected = (dataLen == 0xFFFFFFFF) ? 0xFFFFFFFFFFFFFFFFULL : (u64)(dataLen - 12);
             u64 totalReceived = 0;
 
+            std::string dispName = g_pendingSendPath.substr(g_pendingSendPath.find_last_of('/') + 1);
+            g_telemetry.start(dispName, totalExpected, true);
+            auto tLast = std::chrono::steady_clock::now();
+            u64 bytesLast = 0;
+
             if (firstGot > 12) {
                 size_t payloadInFirst = firstGot - 12;
                 fwrite(s_recvDataBuf + 12, 1, payloadInFirst, f);
@@ -903,10 +961,21 @@ inline void worker() {
                 fwrite(s_recvDataBuf, 1, got, f);
                 totalReceived += got;
 
+                auto now = std::chrono::steady_clock::now();
+                double dt = std::chrono::duration<double>(now - tLast).count();
+                if (dt >= 0.15) {
+                    double spd = (double)(totalReceived - bytesLast) / (dt * 1024.0 * 1024.0);
+                    int eta = (totalExpected > totalReceived && spd > 0.05) ? (int)((double)(totalExpected - totalReceived) / (spd * 1024.0 * 1024.0)) : 0;
+                    g_telemetry.update(totalReceived, (float)spd, eta);
+                    tLast = now;
+                    bytesLast = totalReceived;
+                }
+
                 if (got < toRead) break;
             }
 
             fclose(f);
+            g_telemetry.stop();
 
             struct stat st;
             if (stat(g_pendingSendPath.c_str(), &st) == 0) {

@@ -177,10 +177,11 @@ void renderTextCentered(SDL_Renderer* ren, TTF_Font* font, const std::string& te
 
 // Consola de bitácora estilo DBI: caja con las últimas líneas del log.
 // Recorta líneas largas al ancho disponible (fuente ~7px por carácter).
+// Consola de bitácora estilo DBI: caja con las últimas líneas del log con esquinas redondeadas.
 void drawLogConsole(SDL_Renderer* ren, TTF_Font* font, int x, int y, int w, int h,
                     const ThemeColors& tc, size_t maxLines, const char* title) {
-    boxRGBA(ren, x, y, x + w, y + h, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
-    rectangleRGBA(ren, x, y, x + w, y + h, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
+    roundedBoxRGBA(ren, x, y, x + w, y + h, 8, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
+    roundedRectangleRGBA(ren, x, y, x + w, y + h, 8, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
     renderText(ren, font, title, x + 14, y + 8, tc.TextMuted);
     lineRGBA(ren, x + 14, y + 28, x + w - 14, y + 28, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
     std::vector<std::string> lines = logcon::last(maxLines);
@@ -191,11 +192,90 @@ void drawLogConsole(SDL_Renderer* ren, TTF_Font* font, int x, int y, int w, int 
         if ((int)ln.length() > maxChars) ln = ln.substr(0, maxChars - 3) + "...";
         SDL_Color c = tc.TextSecondary;
         if (ln.find("ERR") != std::string::npos || ln.find("FAIL") != std::string::npos) c = tc.AccentRed;
-        else if (ln.find(" OK") != std::string::npos || ln.find("conectado") != std::string::npos) c = tc.AccentEmerald;
+        else if (ln.find(" OK") != std::string::npos || ln.find("conectado") != std::string::npos || ln.find("recibido") != std::string::npos) c = tc.AccentEmerald;
         renderText(ren, font, ln, x + 14, y + 36 + (int)i * rowH, c);
     }
     if (lines.empty())
         renderText(ren, font, "-- sin eventos --", x + 14, y + 36, tc.TextMuted);
+}
+
+// Tarjeta flotante de telemetría y barra de progreso en tiempo real
+void drawTransferHUD(SDL_Renderer* ren, TTF_Font* fontTitle, TTF_Font* fontBody, TTF_Font* fontSmall,
+                     int x, int y, int w, int h, const ThemeColors& tc) {
+    if (!mtp_ops::g_telemetry.active) {
+        // Tarjeta en reposo
+        roundedBoxRGBA(ren, x, y, x + w, y + h, 10, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
+        roundedRectangleRGBA(ren, x, y, x + w, y + h, 10, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
+
+        renderText(ren, fontTitle, "CANAL USB: EN ESPERA DE TRANSFERENCIA", x + 24, y + 20, tc.AccentEmerald);
+        renderText(ren, fontBody, "Listo para transferir archivos a máxima velocidad (35 - 45 MB/s).", x + 24, y + 54, tc.TextPrimary);
+        renderText(ren, fontSmall, "Arrastra juegos al Instalador o transfiere archivos desde el explorador de tu PC.", x + 24, y + 84, tc.TextMuted);
+        return;
+    }
+
+    // Datos de telemetría activa
+    u64 total = mtp_ops::g_telemetry.totalBytes;
+    u64 transferred = mtp_ops::g_telemetry.transferredBytes;
+    float speed = mtp_ops::g_telemetry.speedMBs;
+    int eta = mtp_ops::g_telemetry.etaSeconds;
+    bool isUp = mtp_ops::g_telemetry.isUpload;
+    const char* filename = mtp_ops::g_telemetry.filename;
+
+    float pct = (total > 0 && total != 0xFFFFFFFFFFFFFFFFULL) ? (float)((double)transferred / (double)total) : 0.0f;
+    if (pct > 1.0f) pct = 1.0f;
+    if (pct < 0.0f) pct = 0.0f;
+
+    // Fondo y borde activo
+    roundedBoxRGBA(ren, x, y, x + w, y + h, 10, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
+    roundedRectangleRGBA(ren, x, y, x + w, y + h, 10, tc.AccentEmerald.r, tc.AccentEmerald.g, tc.AccentEmerald.b, 255);
+
+    // Cabecera de dirección
+    const char* dirTag = isUp ? "▼ RECIBIENDO DESDE PC (USB)" : "▲ ENVIANDO A PC (USB)";
+    renderText(ren, fontSmall, dirTag, x + 24, y + 14, tc.AccentEmerald);
+
+    // Porcentaje
+    char pctBuf[32];
+    snprintf(pctBuf, sizeof(pctBuf), "%.1f %%", pct * 100.0f);
+    renderText(ren, fontTitle, pctBuf, x + w - 110, y + 14, tc.AccentEmerald);
+
+    // Nombre de archivo recortado
+    std::string dispFname = filename;
+    if (dispFname.length() > 50) {
+        dispFname = dispFname.substr(0, 47) + "...";
+    }
+    renderText(ren, fontTitle, dispFname, x + 24, y + 40, tc.TextPrimary);
+
+    // Barra de progreso exterior
+    int bx = x + 24;
+    int by = y + 74;
+    int bw = w - 48;
+    int bh = 14;
+    roundedBoxRGBA(ren, bx, by, bx + bw, by + bh, 7, tc.BgCard.r, tc.BgCard.g, tc.BgCard.b, 255);
+    roundedRectangleRGBA(ren, bx, by, bx + bw, by + bh, 7, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
+
+    // Barra de progreso interior
+    int fillW = (int)((float)bw * pct);
+    if (fillW > 6) {
+        roundedBoxRGBA(ren, bx + 1, by + 1, bx + fillW - 1, by + bh - 1, 6,
+                       tc.AccentEmerald.r, tc.AccentEmerald.g, tc.AccentEmerald.b, 255);
+    }
+
+    // Fila inferior de métricas en tiempo real
+    char infoBuf[128];
+    double mbDone = (double)transferred / (1024.0 * 1024.0);
+    double mbTot = (double)total / (1024.0 * 1024.0);
+    if (total == 0 || total == 0xFFFFFFFFFFFFFFFFULL) {
+        snprintf(infoBuf, sizeof(infoBuf), "%.1f MB transferidos  |  Velocidad: %.1f MB/s", mbDone, speed);
+    } else {
+        if (eta > 0) {
+            snprintf(infoBuf, sizeof(infoBuf), "%.1f MB / %.1f MB  |  Velocidad: %.1f MB/s  |  Restante: ~%ds",
+                     mbDone, mbTot, speed, eta);
+        } else {
+            snprintf(infoBuf, sizeof(infoBuf), "%.1f MB / %.1f MB  |  Velocidad: %.1f MB/s",
+                     mbDone, mbTot, speed);
+        }
+    }
+    renderText(ren, fontBody, infoBuf, x + 24, y + 98, tc.TextSecondary);
 }
 
 // Formateo de bytes a cadena legible
@@ -1454,14 +1534,13 @@ int main(int argc, char* argv[]) {
                 bool isSelected = (menuIdx == i);
 
                 SDL_Color cardBg = isSelected ? tc.BgCard : tc.BgSurface;
-                boxRGBA(renderer, cardStartX, cY, cardStartX + cardW, cY + cardH, cardBg.r, cardBg.g, cardBg.b, 255);
+                roundedBoxRGBA(renderer, cardStartX, cY, cardStartX + cardW, cY + cardH, 8, cardBg.r, cardBg.g, cardBg.b, 255);
 
                 if (isSelected) {
-                    // Solo borde azul en la seleccion
-                    rectangleRGBA(renderer, cardStartX, cY, cardStartX + cardW, cY + cardH, 56, 139, 253, 255);   // Azul GitHub
-                    rectangleRGBA(renderer, cardStartX+1, cY+1, cardStartX + cardW-1, cY + cardH-1, 56, 139, 253, 140);
+                    roundedRectangleRGBA(renderer, cardStartX, cY, cardStartX + cardW, cY + cardH, 8, tc.AccentCyan.r, tc.AccentCyan.g, tc.AccentCyan.b, 255);
+                    roundedRectangleRGBA(renderer, cardStartX+1, cY+1, cardStartX + cardW-1, cY + cardH-1, 7, tc.AccentCyan.r, tc.AccentCyan.g, tc.AccentCyan.b, 140);
                 } else {
-                    rectangleRGBA(renderer, cardStartX, cY, cardStartX + cardW, cY + cardH, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 180);
+                    roundedRectangleRGBA(renderer, cardStartX, cY, cardStartX + cardW, cY + cardH, 8, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 180);
                 }
 
                 if (defs[i].icon) {
@@ -1517,13 +1596,13 @@ int main(int argc, char* argv[]) {
                     bool isSelected = (idx == fileIdx);
 
                     SDL_Color rowBg = isSelected ? tc.BgCard : tc.BgSurface;
-                    boxRGBA(renderer, 40, itemY, 1240, itemY + itemH, rowBg.r, rowBg.g, rowBg.b, 255);
+                    roundedBoxRGBA(renderer, 40, itemY, 1240, itemY + itemH, 6, rowBg.r, rowBg.g, rowBg.b, 255);
 
                     if (isSelected) {
-                        rectangleRGBA(renderer, 40, itemY, 1240, itemY + itemH, tc.AccentCyan.r, tc.AccentCyan.g, tc.AccentCyan.b, 255);
-                        boxRGBA(renderer, 42, itemY + 8, 46, itemY + itemH - 8, tc.AccentCyan.r, tc.AccentCyan.g, tc.AccentCyan.b, 255);
+                        roundedRectangleRGBA(renderer, 40, itemY, 1240, itemY + itemH, 6, tc.AccentCyan.r, tc.AccentCyan.g, tc.AccentCyan.b, 255);
+                        roundedBoxRGBA(renderer, 42, itemY + 8, 46, itemY + itemH - 8, 2, tc.AccentCyan.r, tc.AccentCyan.g, tc.AccentCyan.b, 255);
                     } else {
-                        rectangleRGBA(renderer, 40, itemY, 1240, itemY + itemH, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 160);
+                        roundedRectangleRGBA(renderer, 40, itemY, 1240, itemY + itemH, 6, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 160);
                     }
 
                     SDL_Texture* curIco = icoFileSm;
@@ -1558,8 +1637,8 @@ int main(int argc, char* argv[]) {
                 int mW = 480, mH = 370;
                 int mX = 640 - (mW / 2), mY = 360 - (mH / 2);
 
-                boxRGBA(renderer, mX, mY, mX + mW, mY + mH, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
-                rectangleRGBA(renderer, mX, mY, mX + mW, mY + mH, tc.AccentCyan.r, tc.AccentCyan.g, tc.AccentCyan.b, 255);
+                roundedBoxRGBA(renderer, mX, mY, mX + mW, mY + mH, 12, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
+                roundedRectangleRGBA(renderer, mX, mY, mX + mW, mY + mH, 12, tc.AccentCyan.r, tc.AccentCyan.g, tc.AccentCyan.b, 255);
 
                 renderTextCentered(renderer, fontTitle, tr().ctx_title, 640, mY + 18, tc.TextPrimary);
                 lineRGBA(renderer, mX + 20, mY + 50, mX + mW - 20, mY + 50, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
@@ -1578,8 +1657,8 @@ int main(int argc, char* argv[]) {
                     bool isOptSel = (contextMenuIdx == i);
 
                     if (isOptSel) {
-                        boxRGBA(renderer, mX + 20, optY, mX + mW - 20, optY + 38, tc.BgCard.r, tc.BgCard.g, tc.BgCard.b, 255);
-                        rectangleRGBA(renderer, mX + 20, optY, mX + mW - 20, optY + 38, tc.AccentCyan.r, tc.AccentCyan.g, tc.AccentCyan.b, 255);
+                        roundedBoxRGBA(renderer, mX + 20, optY, mX + mW - 20, optY + 38, 6, tc.BgCard.r, tc.BgCard.g, tc.BgCard.b, 255);
+                        roundedRectangleRGBA(renderer, mX + 20, optY, mX + mW - 20, optY + 38, 6, tc.AccentCyan.r, tc.AccentCyan.g, tc.AccentCyan.b, 255);
                     }
 
                     SDL_Color optCol = (i == 4) ? tc.AccentRed : (isOptSel ? tc.TextPrimary : tc.TextSecondary);
@@ -1592,8 +1671,8 @@ int main(int argc, char* argv[]) {
                 int mW = 540, mH = 260;
                 int mX = 640 - (mW / 2), mY = 360 - (mH / 2);
 
-                boxRGBA(renderer, mX, mY, mX + mW, mY + mH, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
-                rectangleRGBA(renderer, mX, mY, mX + mW, mY + mH, tc.AccentRed.r, tc.AccentRed.g, tc.AccentRed.b, 255);
+                roundedBoxRGBA(renderer, mX, mY, mX + mW, mY + mH, 12, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
+                roundedRectangleRGBA(renderer, mX, mY, mX + mW, mY + mH, 12, tc.AccentRed.r, tc.AccentRed.g, tc.AccentRed.b, 255);
 
                 renderTextCentered(renderer, fontTitle, tr().del_title, 640, mY + 22, tc.AccentRed);
                 lineRGBA(renderer, mX + 20, mY + 58, mX + mW - 20, mY + 58, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
@@ -1604,11 +1683,11 @@ int main(int argc, char* argv[]) {
                     renderTextCentered(renderer, fontBody, files[fileIdx].name, 640, mY + 110, tc.AccentAmber);
                 }
 
-                boxRGBA(renderer, mX + 40, mY + 180, mX + 240, mY + 225, tc.AccentRed.r, tc.AccentRed.g, tc.AccentRed.b, 255);
+                roundedBoxRGBA(renderer, mX + 40, mY + 180, mX + 240, mY + 225, 8, tc.AccentRed.r, tc.AccentRed.g, tc.AccentRed.b, 255);
                 renderTextCentered(renderer, fontSmall, tr().del_confirm, mX + 140, mY + 195, tc.TextPrimary);
 
-                boxRGBA(renderer, mX + 300, mY + 180, mX + 500, mY + 225, tc.BgCard.r, tc.BgCard.g, tc.BgCard.b, 255);
-                rectangleRGBA(renderer, mX + 300, mY + 180, mX + 500, mY + 225, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
+                roundedBoxRGBA(renderer, mX + 300, mY + 180, mX + 500, mY + 225, 8, tc.BgCard.r, tc.BgCard.g, tc.BgCard.b, 255);
+                roundedRectangleRGBA(renderer, mX + 300, mY + 180, mX + 500, mY + 225, 8, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
                 renderTextCentered(renderer, fontSmall, tr().del_cancel, mX + 400, mY + 195, tc.TextSecondary);
             }
 
@@ -1668,38 +1747,35 @@ int main(int argc, char* argv[]) {
             renderText(renderer, fontBody, mtpBtn, 820, 28, mtpBtnCol);
             renderText(renderer, fontSmall, "[Y] Limpiar Log", 1020, 31, tc.TextMuted);
 
-            // Tarjeta de estado compacta
-            int cX = 140, cY = 95, cW = 1000, cH = 110;
-            boxRGBA(renderer, cX, cY, cX + cW, cY + cH, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
-            rectangleRGBA(renderer, cX, cY, cX + cW, cY + cH,
-                          mtp_ops::running() ? tc.AccentEmerald.r : tc.BorderSubtle.r,
-                          mtp_ops::running() ? tc.AccentEmerald.g : tc.BorderSubtle.g,
-                          mtp_ops::running() ? tc.AccentEmerald.b : tc.BorderSubtle.b, 255);
+            // Tarjeta de telemetría y barra de progreso en tiempo real
+            drawTransferHUD(renderer, fontTitle, fontBody, fontSmall, 100, 95, 1080, 130, tc);
 
-            if (icoUsb) {
-                SDL_Rect uDst = { cX + 20, cY + 20, 48, 48 };
-                SDL_RenderCopy(renderer, icoUsb, NULL, &uDst);
+            // Badges de las 5 particiones disponibles con esquinas redondeadas
+            int badgeY = 236;
+            struct PartBadge { const char* label; SDL_Color col; };
+            PartBadge badges[5] = {
+                { "1: MicroSD", tc.AccentEmerald },
+                { "2: Album y Capturas", tc.AccentCyan },
+                { "3: Drop NSP/NSZ/XCI", tc.AccentViolet },
+                { "4: Memoria NAND", tc.AccentAmber },
+                { "5: Juegos Instalados", tc.AccentEmerald }
+            };
+            int bx = 100;
+            int bw = 208;
+            for (int p = 0; p < 5; p++) {
+                roundedBoxRGBA(renderer, bx, badgeY, bx + bw, badgeY + 34, 6, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);
+                roundedRectangleRGBA(renderer, bx, badgeY, bx + bw, badgeY + 34, 6, badges[p].col.r, badges[p].col.g, badges[p].col.b, 180);
+                renderTextCentered(renderer, fontSmall, badges[p].label, bx + bw / 2, badgeY + 8, badges[p].col);
+                bx += bw + 10;
             }
 
-            renderText(renderer, fontTitle, mtp_ops::running() ? "ESTADO: SERVIDOR ACTIVO (0x057E:0x201D)" : "ESTADO: EN ESPERA",
-                       cX + 80, cY + 16, mtp_ops::running() ? tc.AccentEmerald : tc.TextSecondary);
-
-            renderText(renderer, fontBody,
-                       mtp_ops::running() ? "Conecta el cable USB al PC para explorar la tarjeta SD."
-                                          : "Presiona [A] para activar el respondedor MTP e iniciar el enlace USB.",
-                       cX + 80, cY + 48, tc.TextPrimary);
-
-            renderText(renderer, fontSmall,
-                       "Compatible con Explorador de Windows, macOS (Android File Transfer) y Linux.",
-                       cX + 80, cY + 76, tc.TextMuted);
-
-            // Consola de bitácora expandida (alto 435px, 17 líneas visibles)
-            drawLogConsole(renderer, fontSmall, 140, 220, 1000, 435, tc, 17, "BITÁCORA USB MTP");
+            // Consola de bitácora expandida (alto 380px, 15 líneas visibles)
+            drawLogConsole(renderer, fontSmall, 100, 280, 1080, 375, tc, 15, "BITÁCORA USB MTP");
 
             lineRGBA(renderer, 0, 665, 1280, 665, tc.BorderSubtle.r, tc.BorderSubtle.g, tc.BorderSubtle.b, 255);
             renderText(renderer, fontSmall, tr().hint_back, 80, 680, tc.TextMuted);
+            renderText(renderer, fontSmall, "EzFiles Andromeda Suite - USB MTP v1.3.0", 940, 680, tc.TextMuted);
         }
-        // 5. RENDER SERVIDOR FTP + consola estilo DBI
         break;
         case SCREEN_FTP: {
             boxRGBA(renderer, 0, 0, 1280, 80, tc.BgSurface.r, tc.BgSurface.g, tc.BgSurface.b, 255);

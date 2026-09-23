@@ -192,44 +192,40 @@ inline bool mtpDelRec(const std::string& path) {
     return unlink(path.c_str()) == 0;
 }
 
-inline void mtpScanRec(const std::string& path, u32 parent) {
-    if (g_objs.size() >= SCAN_MAX) return;
-    DIR* d = opendir(path.c_str());
-    if (!d) return;
-    struct dirent* e;
-    std::vector<std::string> names;
-    while ((e = readdir(d)) != NULL) {
-        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
-        names.push_back(e->d_name);
+
+inline u32 getOrRegisterHandle(const std::string& path, u32 parent, const std::string& name, bool dir, u64 size, time_t mtime) {
+    for (auto& o : g_objs) {
+        if (o.path == path) {
+            o.parent = parent;
+            o.size = size;
+            o.mtime = mtime;
+            return o.handle;
+        }
     }
-    closedir(d);
-    std::sort(names.begin(), names.end(), [&](const std::string& a, const std::string& b) {
-        struct stat sa, sb;
-        bool da = stat(mtpJoin(path, a).c_str(), &sa) == 0 && S_ISDIR(sa.st_mode);
-        bool db = stat(mtpJoin(path, b).c_str(), &sb) == 0 && S_ISDIR(sb.st_mode);
-        if (da != db) return da > db;
-        return a < b;
-    });
-    for (auto& n : names) {
-        if (g_objs.size() >= SCAN_MAX) return;
-        std::string fp = mtpJoin(path, n);
-        struct stat st;
-        if (stat(fp.c_str(), &st) != 0) continue;
-        MtpObj o{ g_nextHandle++, parent, fp, n, S_ISDIR(st.st_mode) != 0,
-                  S_ISDIR(st.st_mode) ? 0 : (u64)st.st_size, st.st_mtime };
-        g_objs.push_back(o);
-        if (o.dir) mtpScanRec(fp, o.handle);
-    }
+    u32 h = g_nextHandle++;
+    g_objs.push_back({ h, parent, path, name, dir, size, mtime });
+    return h;
 }
 
-inline void mtpRescan() {
-    g_objs.clear();
-    g_nextHandle = 1;
-    mtpScanRec("sdmc:/", 0);
-    g_objsDirty = false;
-    char b[64];
-    snprintf(b, sizeof(b), "MTP scan: %u objetos", (unsigned)g_objs.size());
-    mtp_usb::mlog(b);
+// Escanea ÚNICAMENTE la carpeta solicitada en demanda (instantáneo, sin bloquear el hilo)
+inline std::vector<u32> mtpScanDirectory(const std::string& dirPath, u32 parentHandle) {
+    std::vector<u32> handles;
+    DIR* d = opendir(dirPath.c_str());
+    if (!d) return handles;
+
+    struct dirent* e;
+    while ((e = readdir(d)) != NULL) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        std::string fp = mtpJoin(dirPath, e->d_name);
+        struct stat st;
+        if (stat(fp.c_str(), &st) != 0) continue;
+        bool isDir = S_ISDIR(st.st_mode);
+        u64 sz = isDir ? 0 : (u64)st.st_size;
+        u32 h = getOrRegisterHandle(fp, parentHandle, e->d_name, isDir, sz, st.st_mtime);
+        handles.push_back(h);
+    }
+    closedir(d);
+    return handles;
 }
 
 inline const MtpObj* mtpFind(u32 h) {
@@ -415,11 +411,14 @@ inline void worker() {
         }
         case OP_OpenSession:
             g_session = len >= 16 ? P(0) : 1;
-            g_objsDirty = true;
+            g_objs.clear();
+            g_nextHandle = 1;
+            mtpScanDirectory("sdmc:/", 0); // Cargar sólo la raíz (1 ms)
             sendResponse(tx, MR_OK, nullptr, 0);
             break;
         case OP_CloseSession:
             g_session = 0;
+            g_objs.clear();
             sendResponse(tx, MR_OK, nullptr, 0);
             break;
         case OP_GetStorageIDs: {
@@ -438,16 +437,22 @@ inline void worker() {
         }
         case OP_GetNumObjects:
         case OP_GetObjectHandles: {
-            if (g_objsDirty || g_objs.empty()) mtpRescan();
             u32 parent = len >= 24 ? P(2) : 0xFFFFFFFF;
             u16 fmt    = len >= 20 ? (u16)P(1) : 0;
-            std::vector<u32> hs;
-            for (auto& o : g_objs) {
-                if (fmt == F_Association && !o.dir) continue;
-                if (fmt != 0 && fmt != F_Association && o.dir) continue;
-                if (parent != 0xFFFFFFFF && o.parent != parent) continue;
-                hs.push_back(o.handle);
+
+            std::string scanPath = "sdmc:/";
+            u32 targetParent = 0;
+            if (parent != 0 && parent != 0xFFFFFFFF) {
+                const MtpObj* po = mtpFind(parent);
+                if (po && po->dir) {
+                    scanPath = po->path;
+                    targetParent = po->handle;
+                }
             }
+
+            // Escanea instantáneamente en demanda ÚNICAMENTE la carpeta pedida
+            std::vector<u32> hs = mtpScanDirectory(scanPath, targetParent);
+
             if (code == OP_GetNumObjects) {
                 u32 n = (u32)hs.size();
                 sendResponse(tx, MR_OK, &n, 1);
@@ -460,7 +465,6 @@ inline void worker() {
             break;
         }
         case OP_GetObjectInfo: {
-            if (g_objsDirty || g_objs.empty()) mtpRescan();
             const MtpObj* o = len >= 16 ? mtpFind(P(0)) : nullptr;
             if (!o) { sendResponse(tx, MR_InvalidObjectHandle, nullptr, 0); break; }
             auto d = dsObjectInfo(*o);
@@ -468,7 +472,6 @@ inline void worker() {
             break;
         }
         case OP_GetObject: {
-            if (g_objsDirty || g_objs.empty()) mtpRescan();
             const MtpObj* o = len >= 16 ? mtpFind(P(0)) : nullptr;
             if (!o || o->dir) { sendResponse(tx, MR_InvalidObjectHandle, nullptr, 0); break; }
             char b[96]; snprintf(b, sizeof(b), "MTP GET %s (%llu B)", o->name.c_str(), (unsigned long long)o->size);
@@ -477,10 +480,8 @@ inline void worker() {
             break;
         }
         case OP_DeleteObject: {
-            if (g_objsDirty || g_objs.empty()) mtpRescan();
             const MtpObj* o = len >= 16 ? mtpFind(P(0)) : nullptr;
             bool ok = o && mtpDelRec(o->path);
-            if (ok) g_objsDirty = true;
             sendResponse(tx, ok ? MR_OK : MR_GeneralError, nullptr, 0);
             break;
         }
@@ -550,7 +551,7 @@ inline void worker() {
             u16 prop   = (u16)P(2);
             std::vector<const MtpObj*> targets;
             if (handle == 0 || handle == 0xFFFFFFFF) {
-                if (g_objsDirty || g_objs.empty()) mtpRescan();
+                if (g_objs.empty()) mtpScanDirectory("sdmc:/", 0);
                 for (auto& obj : g_objs) targets.push_back(&obj);
             } else {
                 const MtpObj* o = mtpFind(handle);

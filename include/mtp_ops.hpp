@@ -149,8 +149,9 @@ inline std::string getMtpStr(const u8* p, size_t maxBytes) {
 // --- Particiones y Almacenamientos MTP soportados ---
 constexpr u32 STORAGE_SD      = 0x00010001; // 1: MicroSD
 constexpr u32 STORAGE_ALBUM   = 0x00020001; // 2: Album y Capturas
-constexpr u32 STORAGE_INSTALL = 0x00030001; // 3: Instalador (Drop NSP/NSZ)
+constexpr u32 STORAGE_INSTALL = 0x00030001; // 3: Drop NSP/NSZ/XCI
 constexpr u32 STORAGE_NAND    = 0x00040001; // 4: Memoria Interna (NAND User)
+constexpr u32 STORAGE_GAMES   = 0x00050001; // 5: Juegos Instalados
 
 // --- FS local ---
 struct MtpObj {
@@ -301,6 +302,109 @@ inline void mtpScanAlbumRecursive(u32 storage, const std::string& dirPath, std::
     closedir(d);
 }
 
+// Escanea todas las fuentes posibles de Álbum (SD estándar, emuMMC RAW1/ER00 y NAND)
+inline void mtpScanAllAlbums(u32 storage, std::vector<u32>& handles) {
+    mtpScanAlbumRecursive(storage, "sdmc:/Nintendo/Album", handles);
+
+    DIR* emuDir = opendir("sdmc:/emuMMC");
+    if (emuDir) {
+        struct dirent* e;
+        while ((e = readdir(emuDir)) != NULL) {
+            if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+            std::string p = mtpJoin("sdmc:/emuMMC", e->d_name);
+            std::string alb = mtpJoin(p, "Nintendo/Album");
+            mtpScanAlbumRecursive(storage, alb, handles);
+        }
+        closedir(emuDir);
+    }
+
+    mountNandUser();
+    mtpScanAlbumRecursive(storage, "user:/Album", handles);
+}
+
+// Crea las instrucciones de texto visibles dentro de la partición de instalación
+inline void ensureInstallerReadme() {
+    mkdir("sdmc:/switch", 0777);
+    mkdir("sdmc:/switch/EzFiles", 0777);
+    mkdir("sdmc:/switch/EzFiles/install", 0777);
+
+    const char* readmePath = "sdmc:/switch/EzFiles/install/LEEME - Instrucciones de Instalacion.txt";
+    FILE* f = fopen(readmePath, "wb");
+    if (f) {
+        const char* text = 
+            "======================================================================\r\n"
+            "  EzFiles - Instalador Directo de Juegos (Drop NSP / NSZ / XCI)\r\n"
+            "======================================================================\r\n\r\n"
+            "COMO INSTALAR JUEGOS EN TU CONSOLA:\r\n"
+            "1. Arrastra y suelta directamente tus archivos de juego aqui (.nsp, .nsz, .xci).\r\n"
+            "2. La transferencia comenzara por USB a maxima velocidad (35 - 45 MB/s).\r\n"
+            "3. En la pantalla de tu Switch veras la notificacion en tiempo real.\r\n"
+            "4. Los archivos quedan listos en tu tarjeta SD (sdmc:/switch/EzFiles/install/).\r\n\r\n"
+            "Formatos compatibles:\r\n"
+            " - .nsp (Nintendo Submission Package)\r\n"
+            " - .nsz (NSP Comprimido con zstandard)\r\n"
+            " - .xci (GameCard Dump completo)\r\n\r\n"
+            "======================================================================\r\n";
+        fwrite(text, 1, strlen(text), f);
+        fclose(f);
+    }
+}
+
+// Escanea los juegos y aplicaciones instalados en la consola (similar a DBI)
+inline void mtpScanInstalledGames(u32 storage, std::vector<u32>& handles) {
+    Result rc = nsInitialize();
+    if (R_FAILED(rc)) return;
+
+    NsApplicationRecord records[128];
+    s32 entryCount = 0;
+    rc = nsListApplicationRecord(records, 128, 0, &entryCount);
+    if (R_SUCCEEDED(rc)) {
+        for (s32 i = 0; i < entryCount; i++) {
+            u64 titleId = records[i].application_id;
+            char titleName[512] = "";
+
+            NsApplicationControlData* controlData = (NsApplicationControlData*)malloc(sizeof(NsApplicationControlData));
+            size_t actualSize = 0;
+            if (controlData) {
+                memset(controlData, 0, sizeof(NsApplicationControlData));
+                Result crc = nsGetApplicationControlData(NsApplicationControlSource_Storage, titleId, controlData, sizeof(NsApplicationControlData), &actualSize);
+                if (R_SUCCEEDED(crc)) {
+                    NacpLanguageEntry* langEntry = nullptr;
+                    nacpGetLanguageEntry(&controlData->nacp, &langEntry);
+                    if (langEntry && langEntry->name[0] != '\0') {
+                        strncpy(titleName, langEntry->name, sizeof(titleName) - 1);
+                    }
+                }
+                free(controlData);
+            }
+
+            if (titleName[0] == '\0') {
+                snprintf(titleName, sizeof(titleName), "Titulo [%016llX]", (unsigned long long)titleId);
+            }
+
+            NsApplicationOccupiedSize occSize = {};
+            u64 gameSize = 0;
+            if (R_SUCCEEDED(nsCalculateApplicationOccupiedSize(titleId, &occSize))) {
+                const u64* p = (const u64*)occSize.unk_x0;
+                gameSize = p[0] + p[1] + p[2] + p[3];
+            }
+
+            char filename[560];
+            for (char* p = titleName; *p; p++) {
+                if (*p == '/' || *p == '\\' || *p == ':' || *p == '*' || *p == '?' || *p == '"' || *p == '<' || *p == '>' || *p == '|') {
+                    *p = '_';
+                }
+            }
+            snprintf(filename, sizeof(filename), "%s [%016llX].nsp", titleName, (unsigned long long)titleId);
+
+            std::string virtPath = "virtual:/games/" + std::string(filename);
+            u32 h = getOrRegisterHandle(storage, virtPath, 0, filename, false, gameSize, time(nullptr));
+            handles.push_back(h);
+        }
+    }
+    nsExit();
+}
+
 // --- Bulk I/O delegadas al driver de hardware usbMtpTransfer ---
 inline bool epWrite(UsbDsEndpoint* /*ep*/, const u8* data, size_t len) {
     if (!g_run) return false;
@@ -427,6 +531,7 @@ inline std::vector<u8> dsStorageIDs() {
     if (cfg.mtpShowAlbum) sids.push_back(STORAGE_ALBUM);
     if (cfg.mtpEnableInstaller) sids.push_back(STORAGE_INSTALL);
     if (cfg.mtpShowNANDUser) sids.push_back(STORAGE_NAND);
+    sids.push_back(STORAGE_GAMES);
     if (sids.empty()) sids.push_back(STORAGE_SD);
 
     std::vector<u8> v;
@@ -470,6 +575,11 @@ inline std::vector<u8> dsStorageInfo(u32 storage_id) {
         }
         desc = "4: Memoria NAND (User)";
         name = "nand";
+    } else if (storage_id == STORAGE_GAMES) {
+        desc = "5: Juegos Instalados";
+        name = "games";
+        cap = 64ULL * 1024 * 1024 * 1024;
+        fr = 0;
     }
 
     std::vector<u8> v;
@@ -561,20 +671,18 @@ inline void worker() {
             if (AppConfig::get().mtpShowSD) {
                 mtpScanDirectory(STORAGE_SD, "sdmc:/", 0);
             }
-            if (AppConfig::get().mtpShowAlbum) {
-                std::vector<u32> aHs;
-                mtpScanAlbumRecursive(STORAGE_ALBUM, "sdmc:/Nintendo/Album", aHs);
-            }
-            if (AppConfig::get().mtpEnableInstaller) {
-                mkdir("sdmc:/switch", 0777);
-                mkdir("sdmc:/switch/EzFiles", 0777);
-                mkdir("sdmc:/switch/EzFiles/install", 0777);
-                mtpScanDirectory(STORAGE_INSTALL, "sdmc:/switch/EzFiles/install", 0);
-            }
-            if (AppConfig::get().mtpShowNANDUser) {
-                mountNandUser();
-                mtpScanDirectory(STORAGE_NAND, "user:/", 0);
-            }
+            std::vector<u32> aHs;
+            mtpScanAllAlbums(STORAGE_ALBUM, aHs);
+
+            ensureInstallerReadme();
+            mtpScanDirectory(STORAGE_INSTALL, "sdmc:/switch/EzFiles/install", 0);
+
+            mountNandUser();
+            mtpScanDirectory(STORAGE_NAND, "user:/", 0);
+
+            std::vector<u32> gHs;
+            mtpScanInstalledGames(STORAGE_GAMES, gHs);
+
             mtp_usb::mlog("MTP: PC conectada");
             sendResponse(tx, MR_OK, nullptr, 0);
             break;
@@ -614,18 +722,17 @@ inline void worker() {
                 }
             } else {
                 if (storage == STORAGE_ALBUM) {
-                    scanPath = "sdmc:/Nintendo/Album";
                     targetStorage = STORAGE_ALBUM;
                 } else if (storage == STORAGE_INSTALL) {
-                    mkdir("sdmc:/switch", 0777);
-                    mkdir("sdmc:/switch/EzFiles", 0777);
-                    mkdir("sdmc:/switch/EzFiles/install", 0777);
+                    ensureInstallerReadme();
                     scanPath = "sdmc:/switch/EzFiles/install";
                     targetStorage = STORAGE_INSTALL;
                 } else if (storage == STORAGE_NAND) {
                     mountNandUser();
                     scanPath = "user:/";
                     targetStorage = STORAGE_NAND;
+                } else if (storage == STORAGE_GAMES) {
+                    targetStorage = STORAGE_GAMES;
                 } else {
                     scanPath = "sdmc:/";
                     targetStorage = STORAGE_SD;
@@ -641,7 +748,9 @@ inline void worker() {
             }
             if (hs.empty()) {
                 if (targetStorage == STORAGE_ALBUM && targetParent == 0) {
-                    mtpScanAlbumRecursive(targetStorage, "sdmc:/Nintendo/Album", hs);
+                    mtpScanAllAlbums(targetStorage, hs);
+                } else if (targetStorage == STORAGE_GAMES && targetParent == 0) {
+                    mtpScanInstalledGames(targetStorage, hs);
                 } else {
                     hs = mtpScanDirectory(targetStorage, scanPath, targetParent);
                 }

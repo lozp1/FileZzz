@@ -384,7 +384,7 @@ inline void mtpScanAllAlbums(u32 storage, std::vector<u32>& handles) {
     mtpScanAlbumRecursive(storage, "user:/Album", handles);
 }
 
-// Prepara las particiones virtuales de instalación al estilo DBI (SD y NAND)
+// Prepara las particiones virtuales de instalacion al estilo DBI (SD y NAND)
 inline void mtpScanInstaller(u32 storage, std::vector<u32>& handles) {
     bool isNand = (storage == STORAGE_INSTALL_NAND);
     std::string folder = isNand ? "sdmc:/switch/EzFiles/install_nand" : "sdmc:/switch/EzFiles/install_sd";
@@ -397,18 +397,18 @@ inline void mtpScanInstaller(u32 storage, std::vector<u32>& handles) {
         struct dirent* e;
         while ((e = readdir(d)) != NULL) {
             if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
-            if (!strcmp(e->d_name, "PLACE_NSP_NSZ_XCI_OR_ZIP_FILES_HERE")) continue;
+            if (!strcmp(e->d_name, "Place NSP, NSZ, XCI, XCZ or MSP files here")) continue;
             std::string p = mtpJoin(folder, e->d_name);
             unlink(p.c_str());
         }
         closedir(d);
     }
 
-    std::string tagPath = folder + "/PLACE_NSP_NSZ_XCI_OR_ZIP_FILES_HERE";
+    std::string tagPath = folder + "/Place NSP, NSZ, XCI, XCZ or MSP files here";
     FILE* f = fopen(tagPath.c_str(), "wb");
     if (f) fclose(f);
 
-    u32 h = getOrRegisterHandle(storage, tagPath, 0, "PLACE_NSP_NSZ_XCI_OR_ZIP_FILES_HERE", false, 0, time(nullptr));
+    u32 h = getOrRegisterHandle(storage, tagPath, 0, "Place NSP, NSZ, XCI, XCZ or MSP files here", false, 0, time(nullptr));
     handles.push_back(h);
 }
 
@@ -417,15 +417,78 @@ inline void mtpScanSaves(u32 storage, std::vector<u32>& handles) {
     mkdir("sdmc:/switch/EzFiles", 0777);
     mkdir("sdmc:/switch/EzFiles/saves", 0777);
 
-    std::string saveDir = "sdmc:/switch/EzFiles/saves";
-    if (access("sdmc:/JKSV", F_OK) == 0) {
-        saveDir = "sdmc:/JKSV";
+    // Carpetas raiz de almacenamiento 7: Saves al estilo DBI
+    std::string pInst = "virtual:/saves/installed";
+    std::string pUninst = "virtual:/saves/uninstalled";
+    u32 hInst = getOrRegisterHandle(storage, pInst, 0, "Installed games", true, 0, time(nullptr));
+    u32 hUninst = getOrRegisterHandle(storage, pUninst, 0, "Uninstalled games", true, 0, time(nullptr));
+    handles.push_back(hInst);
+    handles.push_back(hUninst);
+
+    // Poblar juegos instalados con partidas guardadas
+    Result rc = nsInitialize();
+    if (R_SUCCEEDED(rc)) {
+        NsApplicationRecord records[128];
+        s32 entryCount = 0;
+        if (R_SUCCEEDED(nsListApplicationRecord(records, 128, 0, &entryCount))) {
+            for (s32 i = 0; i < entryCount; i++) {
+                u64 titleId = records[i].application_id;
+                char titleName[512] = "";
+
+                NsApplicationControlData* controlData = (NsApplicationControlData*)malloc(sizeof(NsApplicationControlData));
+                size_t actualSize = 0;
+                if (controlData) {
+                    memset(controlData, 0, sizeof(NsApplicationControlData));
+                    Result crc = nsGetApplicationControlData(NsApplicationControlSource_Storage, titleId, controlData, sizeof(NsApplicationControlData), &actualSize);
+                    if (R_SUCCEEDED(crc)) {
+                        NacpLanguageEntry* langEntry = nullptr;
+                        nacpGetLanguageEntry(&controlData->nacp, &langEntry);
+                        if (langEntry && langEntry->name[0] != '\0') {
+                            strncpy(titleName, langEntry->name, sizeof(titleName) - 1);
+                        }
+                    }
+                    free(controlData);
+                }
+
+                if (titleName[0] == '\0') {
+                    snprintf(titleName, sizeof(titleName), "Titulo [%016llX]", (unsigned long long)titleId);
+                }
+
+                for (char* p = titleName; *p; p++) {
+                    if (*p == '/' || *p == '\\' || *p == ':' || *p == '*' || *p == '?' || *p == '"' || *p == '<' || *p == '>' || *p == '|') {
+                        *p = '_';
+                    }
+                }
+
+                std::string gameSaveDir = pInst + "/" + std::string(titleName);
+                u32 hGameSave = getOrRegisterHandle(storage, gameSaveDir, hInst, titleName, true, 0, time(nullptr));
+
+                // Dentro de la carpeta de guardado del juego
+                std::string saveInfoFile = gameSaveDir + "/save_info.txt";
+                getOrRegisterHandle(storage, saveInfoFile, hGameSave, "save_info.txt", false, 0, time(nullptr));
+            }
+        }
+        nsExit();
     }
 
-    handles = mtpScanDirectory(storage, saveDir, 0);
+    // Poblar uninstalled games si existen respaldos en JKSV o EzFiles
+    std::string uninstDir = access("sdmc:/JKSV", F_OK) == 0 ? "sdmc:/JKSV" : "sdmc:/switch/EzFiles/saves";
+    DIR* ud = opendir(uninstDir.c_str());
+    if (ud) {
+        struct dirent* ue;
+        while ((ue = readdir(ud)) != NULL) {
+            if (!strcmp(ue->d_name, ".") || !strcmp(ue->d_name, "..")) continue;
+            std::string fp = mtpJoin(uninstDir, ue->d_name);
+            struct stat ust;
+            if (stat(fp.c_str(), &ust) == 0 && S_ISDIR(ust.st_mode)) {
+                getOrRegisterHandle(storage, fp, hUninst, ue->d_name, true, 0, ust.st_mtime);
+            }
+        }
+        closedir(ud);
+    }
 }
 
-// Escanea los juegos y aplicaciones instalados en la consola (similar a DBI)
+// Escanea los juegos instalados (4: Installed games) creando carpetas individuales y dumps .nsp estilo DBI
 inline void mtpScanInstalledGames(u32 storage, std::vector<u32>& handles) {
     Result rc = nsInitialize();
     if (R_FAILED(rc)) return;
@@ -472,9 +535,19 @@ inline void mtpScanInstalledGames(u32 storage, std::vector<u32>& handles) {
             }
             snprintf(filename, sizeof(filename), "%s [%016llX].nsp", titleName, (unsigned long long)titleId);
 
+            // 1. Carpeta con el nombre del juego (DBI style)
+            std::string folderPath = "virtual:/games/" + std::string(titleName);
+            u32 hDir = getOrRegisterHandle(storage, folderPath, 0, titleName, true, 0, time(nullptr));
+            handles.push_back(hDir);
+
+            // 2. Archivo .nsp directo en la raiz de la particion (DBI style)
             std::string virtPath = "virtual:/games/" + std::string(filename);
-            u32 h = getOrRegisterHandle(storage, virtPath, 0, filename, false, gameSize, time(nullptr));
-            handles.push_back(h);
+            u32 hFile = getOrRegisterHandle(storage, virtPath, 0, filename, false, gameSize, time(nullptr));
+            handles.push_back(hFile);
+
+            // 3. Archivo .nsp visible tambien dentro de la carpeta del juego
+            std::string insideNsp = folderPath + "/" + std::string(filename);
+            getOrRegisterHandle(storage, insideNsp, hDir, filename, false, gameSize, time(nullptr));
         }
     }
     nsExit();
@@ -800,6 +873,9 @@ inline void worker() {
 
             std::vector<u32> gHs;
             mtpScanInstalledGames(STORAGE_GAMES, gHs);
+
+            std::vector<u32> sHs;
+            mtpScanSaves(STORAGE_SAVES, sHs);
 
             mtp_usb::mlog("MTP: PC conectada");
             sendResponse(tx, MR_OK, nullptr, 0);

@@ -8,9 +8,9 @@
     paddingBottom="20px">
 
     <brls:Header
-        title="Ajustes y Personalización" />
+        title="Ajustes y Personalizacion" />
     <brls:Label
-        text="Configura la apariencia y el comportamiento de la aplicación"
+        text="Configura la apariencia y el comportamiento de la aplicacion"
         fontSize="15px"
         textColor="#9CA3AF"
         marginTop="4px" />
@@ -36,7 +36,7 @@
             <brls:DetailCell
                 id="cellLanguage"
                 title="Idioma"
-                detail="Español" />
+                detail="Espanol" />
 
             <brls:Header
                 title="Servicios de Red"

@@ -8,25 +8,24 @@
     backgroundColor="#0F1117">
 
     <brls:Image
-        image="@res/img/icon_explorer.png"
-        width="160px"
-        height="160px" />
+        id="splashLogo"
+        image="@res/img/ezfiles_logo.jpg"
+        width="220px"
+        height="220px"
+        cornerRadius="16px" />
 
     <brls:Label
+        id="splashTitle"
         text="EzFiles"
-        fontSize="40px"
+        fontSize="36px"
         textColor="#06B6D4"
-        marginTop="20px" />
+        marginTop="24px" />
 
     <brls:Label
-        text="Cargando entorno gráfico..."
-        fontSize="16px"
+        id="splashSub"
+        text="Iniciando sistema..."
+        fontSize="15px"
         textColor="#9CA3AF"
-        marginTop="10px" />
-
-    <brls:ProgressSpinner
-        width="40px"
-        height="40px"
-        marginTop="30px" />
+        marginTop="8px" />
 
 </brls:Box>

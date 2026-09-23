@@ -29,12 +29,12 @@
         <brls:Box axis="column">
             <brls:Label
                 id="lblMtpStatus"
-                text="Estado: Esperando conexión..."
+                text="Estado: Esperando conexion..."
                 fontSize="22px"
                 textColor="#10B981" />
             <brls:Label
                 id="lblMtpInfo"
-                text="Particiones activas: MicroSD, Álbum, Instalador"
+                text="8 Particiones: SD, User, System, Juegos, Install SD/NAND, Saves, Album"
                 fontSize="16px"
                 textColor="#9CA3AF"
                 marginTop="6px" />

@@ -83,7 +83,7 @@ public:
             size_t slash = g_clipboardPath.find_last_of('/');
             std::string clipName = (slash != std::string::npos) ? g_clipboardPath.substr(slash + 1) : g_clipboardPath;
             auto pasteItem = new brls::DetailCell();
-            pasteItem->setText(std::string(">> PEGAR AQUÍ: ") + clipName);
+            pasteItem->setText(std::string(">> PEGAR AQUI: ") + clipName);
             pasteItem->setDetailText(g_clipboardIsCut ? "[Mover archivo]" : "[Copiar archivo]");
             pasteItem->setTextColor(nvgRGB(16, 185, 129));
             pasteItem->registerClickAction([this, clipName](brls::View*) {
@@ -151,12 +151,19 @@ public:
                 else snprintf(sBuf, sizeof(sBuf), "%.2f GB", sz / (1024.0*1024.0*1024.0));
                 cell->setDetailText(sBuf);
 
-                // Opciones contextuales para archivos
+                // Clic primario en archivo muestra propiedades informativas sin error
                 cell->registerClickAction([this, fullPath, name, sz](brls::View*) {
-                    showFileActionsDialog(fullPath, name, sz);
+                    showFileProperties(fullPath, name, sz);
                     return true;
                 });
             }
+
+            // Atajo con Boton X de mando Nintendo Switch para menu contextual
+            cell->registerAction("Opciones", brls::BUTTON_X, [this, fullPath, name, isDir](brls::View*) {
+                showFileActionsDialog(fullPath, name, isDir);
+                return true;
+            });
+
             boxFiles->addView(cell);
             count++;
         }
@@ -165,7 +172,15 @@ public:
         if (lblItemCount) lblItemCount->setText(std::to_string(count) + " elementos");
     }
 
-    void showFileActionsDialog(const std::string& fullPath, const std::string& name, u64 sz) {
+    void showFileProperties(const std::string& fullPath, const std::string& name, u64 sz) {
+        char pBuf[256];
+        snprintf(pBuf, sizeof(pBuf), "Ruta: %s\nTamano: %llu bytes", fullPath.c_str(), (unsigned long long)sz);
+        brls::Dialog* prop = new brls::Dialog(pBuf);
+        prop->addButton("Aceptar", []() {});
+        prop->open();
+    }
+
+    void showFileActionsDialog(const std::string& fullPath, const std::string& name, bool isDir) {
         brls::Dialog* d = new brls::Dialog(name);
         d->addButton("Copiar", [this, fullPath]() {
             g_clipboardPath = fullPath;
@@ -177,39 +192,41 @@ public:
             g_clipboardIsCut = true;
             refreshList();
         });
-        d->addButton("Más opciones", [this, fullPath, name, sz]() {
-            showSecondaryActionsDialog(fullPath, name, sz);
-        });
-        d->open();
-    }
-
-    void showSecondaryActionsDialog(const std::string& fullPath, const std::string& name, u64 sz) {
-        brls::Dialog* d2 = new brls::Dialog(name);
-        d2->addButton("Renombrar", [this, fullPath, name]() {
-            std::string newName = showHorizonKeyboard("Nuevo nombre de archivo", name);
-            if (!newName.empty() && newName != name) {
-                std::string newPath = currentPath + (currentPath.back() == '/' ? "" : "/") + newName;
-                rename(fullPath.c_str(), newPath.c_str());
-                refreshList();
-            }
-        });
-        d2->addButton("Eliminar", [this, fullPath, name]() {
-            brls::Dialog* confirm = new brls::Dialog("¿Seguro que deseas eliminar '" + name + "'?");
-            confirm->addButton("Eliminar", [this, fullPath]() {
-                unlink(fullPath.c_str());
-                refreshList();
+        d->addButton("Renombrar", [this, fullPath, name]() {
+            brls::sync([this, fullPath, name]() {
+                std::string newName = showHorizonKeyboard("Nuevo nombre de archivo", name);
+                if (!newName.empty() && newName != name) {
+                    std::string newPath = currentPath + (currentPath.back() == '/' ? "" : "/") + newName;
+                    rename(fullPath.c_str(), newPath.c_str());
+                    refreshList();
+                }
             });
-            confirm->addButton("Cancelar", []() {});
-            confirm->open();
         });
-        d2->addButton("Propiedades", [this, fullPath, name, sz]() {
-            char pBuf[256];
-            snprintf(pBuf, sizeof(pBuf), "Ruta: %s\nTamaño: %llu bytes", fullPath.c_str(), (unsigned long long)sz);
-            brls::Dialog* prop = new brls::Dialog(pBuf);
-            prop->addButton("Aceptar", []() {});
-            prop->open();
+        d->addButton("Eliminar", [this, fullPath, name, isDir]() {
+            brls::sync([this, fullPath, name, isDir]() {
+                brls::Dialog* confirm = new brls::Dialog("Seguro que deseas eliminar '" + name + "'?");
+                confirm->addButton("Eliminar", [this, fullPath, isDir]() {
+                    if (isDir) {
+                        mtp_ops::mtpDelRec(fullPath);
+                    } else {
+                        unlink(fullPath.c_str());
+                    }
+                    refreshList();
+                });
+                confirm->addButton("Cancelar", []() {});
+                confirm->open();
+            });
         });
-        d2->open();
+        d->addButton("Propiedades", [this, fullPath, name]() {
+            brls::sync([this, fullPath, name]() {
+                struct stat st;
+                u64 sz = 0;
+                if (stat(fullPath.c_str(), &st) == 0) sz = st.st_size;
+                showFileProperties(fullPath, name, sz);
+            });
+        });
+        d->addButton("Cancelar", []() {});
+        d->open();
     }
 
 private:
@@ -243,7 +260,7 @@ public:
 
         updateUIState(mtp_ops::running());
 
-        // Tarea periódica de actualización de telemetría (4 Hz)
+        // Tarea periodica de actualizacion de telemetria (4 Hz)
         updateTimer.setCallback([this]() {
             updateTelemetry();
         });
@@ -337,7 +354,7 @@ public:
         }
         if (lblFtpAddress) {
             std::string ip = ftp_server::getRealIp();
-            lblFtpAddress->setText(running ? ("Dirección: ftp://" + ip + ":5000") : "Dirección: Desconectado");
+            lblFtpAddress->setText(running ? ("Direccion: ftp://" + ip + ":5000") : "Direccion: Desconectado");
         }
         if (btnToggleFtp) {
             btnToggleFtp->setText(running ? "Detener FTP" : "Iniciar FTP");
@@ -358,8 +375,12 @@ public:
 
         cellTheme = dynamic_cast<brls::DetailCell*>(this->getView("cellTheme"));
         cellLanguage = dynamic_cast<brls::DetailCell*>(this->getView("cellLanguage"));
+        cellFtpPort = dynamic_cast<brls::DetailCell*>(this->getView("cellFtpPort"));
+        cellMtpPartitions = dynamic_cast<brls::DetailCell*>(this->getView("cellMtpPartitions"));
 
         if (cellTheme) {
+            bool isDark = (brls::Application::getPlatform()->getThemeVariant() == brls::ThemeVariant::DARK);
+            cellTheme->setDetailText(isDark ? "Oscuro (Predeterminado)" : "Claro");
             cellTheme->registerClickAction([this](brls::View*) {
                 bool isDark = (brls::Application::getPlatform()->getThemeVariant() == brls::ThemeVariant::DARK);
                 brls::Application::getPlatform()->setThemeVariant(isDark ? brls::ThemeVariant::LIGHT : brls::ThemeVariant::DARK);
@@ -369,10 +390,11 @@ public:
         }
 
         if (cellLanguage) {
+            cellLanguage->setDetailText("Espanol");
             cellLanguage->registerClickAction([this](brls::View*) {
                 brls::Dialog* d = new brls::Dialog("Seleccionar idioma");
-                d->addButton("Español (Predeterminado)", [this]() {
-                    cellLanguage->setDetailText("Español");
+                d->addButton("Espanol (Predeterminado)", [this]() {
+                    cellLanguage->setDetailText("Espanol");
                 });
                 d->addButton("English", [this]() {
                     cellLanguage->setDetailText("English");
@@ -380,6 +402,14 @@ public:
                 d->open();
                 return true;
             });
+        }
+
+        if (cellFtpPort) {
+            cellFtpPort->setDetailText("5000");
+        }
+
+        if (cellMtpPartitions) {
+            cellMtpPartitions->setDetailText("8 Unidades (Estilo DBI)");
         }
     }
 
@@ -390,6 +420,8 @@ public:
 private:
     brls::DetailCell* cellTheme = nullptr;
     brls::DetailCell* cellLanguage = nullptr;
+    brls::DetailCell* cellFtpPort = nullptr;
+    brls::DetailCell* cellMtpPartitions = nullptr;
 };
 
 // --- Tab 5: Acerca de ---
@@ -416,11 +448,20 @@ public:
     CONTENT_FROM_XML_FILE("romfs:/xml/view_splash.xml");
 
     SplashActivity() {
+        // Carga opcional de logotipo personalizado desde la tarjeta SD si existe
+        if (access("sdmc:/switch/EzFiles/logo.png", F_OK) == 0) {
+            brls::Image* img = dynamic_cast<brls::Image*>(this->getView("splashLogo"));
+            if (img) img->setImageFromFile("sdmc:/switch/EzFiles/logo.png");
+        } else if (access("sdmc:/switch/EzFiles/splash.png", F_OK) == 0) {
+            brls::Image* img = dynamic_cast<brls::Image*>(this->getView("splashLogo"));
+            if (img) img->setImageFromFile("sdmc:/switch/EzFiles/splash.png");
+        }
+
         splashTimer.setCallback([this]() {
             splashTimer.stop();
             brls::Application::pushActivity(new MainActivity(), brls::TransitionAnimation::FADE);
         });
-        splashTimer.start(1200); // 1.2 segundos con fade automático
+        splashTimer.start(1200); // 1.2 segundos con transicion suave
     }
 
 private:
@@ -428,7 +469,7 @@ private:
 };
 
 int main(int argc, char* argv[]) {
-    // Configurar bitácora persistente en SD para diagnóstico
+    // Configurar bitacora persistente en SD para diagnostico
     mkdir("sdmc:/switch", 0777);
     mkdir("sdmc:/switch/EzFiles", 0777);
     FILE* logf = fopen("sdmc:/switch/EzFiles/ezfiles.log", "w");
@@ -438,7 +479,7 @@ int main(int argc, char* argv[]) {
         brls::Logger::info("EzFiles Borealis iniciando...");
     }
 
-    // Configurar idioma predeterminado al español
+    // Configurar idioma predeterminado al espanol
     brls::Platform::APP_LOCALE_DEFAULT = "es-419";
 
     if (!brls::Application::init()) {
@@ -450,7 +491,7 @@ int main(int argc, char* argv[]) {
     brls::Application::createWindow("EzFiles");
     brls::Application::getPlatform()->setThemeVariant(brls::ThemeVariant::DARK);
 
-    // Salir de la aplicación limpiamente con botón '+' (START)
+    // Salir de la aplicacion limpiamente con boton '+' (START)
     brls::Application::setGlobalQuit(true);
 
     // Registrar vistas personalizadas del XML
@@ -464,7 +505,7 @@ int main(int argc, char* argv[]) {
         brls::Application::pushActivity(new SplashActivity());
         while (brls::Application::mainLoop());
     } catch (const std::exception& e) {
-        brls::Logger::error("Excepción interceptada: {}", e.what());
+        brls::Logger::error("Excepcion interceptada: {}", e.what());
     }
 
     // Cierre limpio de servicios de fondo

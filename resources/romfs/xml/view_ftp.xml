@@ -8,7 +8,7 @@
     paddingBottom="20px">
 
     <brls:Header
-        title="Servidor FTP Inalámbrico" />
+        title="Servidor FTP Inalambrico" />
     <brls:Label
         text="Transfiere archivos mediante Wi-Fi desde cualquier cliente FTP (FileZilla, WinSCP)"
         fontSize="15px"
@@ -34,7 +34,7 @@
                 textColor="#8B5CF6" />
             <brls:Label
                 id="lblFtpAddress"
-                text="Dirección: ftp://0.0.0.0:5000"
+                text="Direccion: ftp://0.0.0.0:5000"
                 fontSize="16px"
                 textColor="#9CA3AF"
                 marginTop="6px" />
@@ -48,7 +48,7 @@
     </brls:Box>
 
     <brls:Header
-        title="Instrucciones de Conexión"
+        title="Instrucciones de Conexion"
         marginTop="30px" />
 
     <brls:Box
@@ -59,7 +59,7 @@
         cornerRadius="8px"
         backgroundColor="#0F1117">
         <brls:Label
-            text="1. Asegúrate de que la Switch y tu PC estén en la misma red Wi-Fi."
+            text="1. Asegurate de que la Switch y tu PC esten en la misma red Wi-Fi."
             fontSize="16px"
             textColor="#D1D5DB" />
         <brls:Label
@@ -68,7 +68,7 @@
             textColor="#D1D5DB"
             marginTop="8px" />
         <brls:Label
-            text="3. Usuario y contraseña: Dejar en blanco o usar modo anónimo."
+            text="3. Usuario y contrasena: Dejar en blanco o usar modo anonimo."
             fontSize="16px"
             textColor="#D1D5DB"
             marginTop="8px" />

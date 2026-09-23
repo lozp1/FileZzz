@@ -1,0 +1,35 @@
+<brls:Box
+    xmlns:brls="http://borealis.org/borealis"
+    width="auto"
+    height="auto"
+    axis="column"
+    paddingTop="20px"
+    paddingLeft="40px"
+    paddingRight="40px"
+    paddingBottom="20px">
+
+    <brls:Box
+        width="auto"
+        height="auto"
+        axis="row"
+        justifyContent="spaceBetween"
+        alignItems="center">
+        <brls:Label
+            id="lblCurrentPath"
+            text="sdmc:/"
+            fontSize="20px"
+            textColor="#06B6D4" />
+        <brls:Label
+            id="lblItemCount"
+            text="0 elementos"
+            fontSize="16px"
+            textColor="#9CA3AF" />
+    </brls:Box>
+
+    <brls:List
+        id="listExplorerFiles"
+        width="auto"
+        height="auto"
+        marginTop="15px" />
+
+</brls:Box>

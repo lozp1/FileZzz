@@ -4,6 +4,7 @@
 
 #include <switch.h>
 #include "mtp_usb.hpp"
+#include "config.hpp"
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
@@ -145,9 +146,16 @@ inline std::string getMtpStr(const u8* p, size_t maxBytes) {
     return out;
 }
 
+// --- Particiones y Almacenamientos MTP soportados ---
+constexpr u32 STORAGE_SD      = 0x00010001; // 1: MicroSD
+constexpr u32 STORAGE_ALBUM   = 0x00020001; // 2: Album y Capturas
+constexpr u32 STORAGE_INSTALL = 0x00030001; // 3: Instalador (Drop NSP/NSZ)
+constexpr u32 STORAGE_NAND    = 0x00040001; // 4: Memoria Interna (NAND User)
+
 // --- FS local ---
 struct MtpObj {
     u32 handle;
+    u32 storage;
     u32 parent;
     std::string path;
     std::string name;
@@ -156,12 +164,17 @@ struct MtpObj {
     time_t mtime;
 };
 
-constexpr u32 MTP_STORAGE = 0x00010001;
 constexpr size_t SCAN_MAX = 8192;
 inline std::vector<MtpObj> g_objs;
 inline u32 g_nextHandle = 1;
 inline bool g_objsDirty = true;
 inline u32 g_session = 0;
+
+// Variables de estado para subida/escritura de archivos (PC -> Switch)
+inline u32 g_pendingSendId = 0;
+inline std::string g_pendingSendPath = "";
+inline u64 g_pendingSendSize = 0;
+inline u32 g_pendingSendStorage = 0;
 
 inline void mtpDateStr(time_t t, char* buf, size_t sz) {
     struct tm tm;
@@ -192,10 +205,10 @@ inline bool mtpDelRec(const std::string& path) {
     return unlink(path.c_str()) == 0;
 }
 
-
-inline u32 getOrRegisterHandle(const std::string& path, u32 parent, const std::string& name, bool dir, u64 size, time_t mtime) {
+inline u32 getOrRegisterHandle(u32 storage, const std::string& path, u32 parent, const std::string& name, bool dir, u64 size, time_t mtime) {
     for (auto& o : g_objs) {
         if (o.path == path) {
+            o.storage = storage;
             o.parent = parent;
             o.size = size;
             o.mtime = mtime;
@@ -203,12 +216,12 @@ inline u32 getOrRegisterHandle(const std::string& path, u32 parent, const std::s
         }
     }
     u32 h = g_nextHandle++;
-    g_objs.push_back({ h, parent, path, name, dir, size, mtime });
+    g_objs.push_back({ h, storage, parent, path, name, dir, size, mtime });
     return h;
 }
 
 // Escanea ÚNICAMENTE la carpeta solicitada en demanda (instantáneo, sin bloquear el hilo)
-inline std::vector<u32> mtpScanDirectory(const std::string& dirPath, u32 parentHandle) {
+inline std::vector<u32> mtpScanDirectory(u32 storage, const std::string& dirPath, u32 parentHandle) {
     std::vector<u32> handles;
     DIR* d = opendir(dirPath.c_str());
     if (!d) return handles;
@@ -221,7 +234,7 @@ inline std::vector<u32> mtpScanDirectory(const std::string& dirPath, u32 parentH
         if (stat(fp.c_str(), &st) != 0) continue;
         bool isDir = S_ISDIR(st.st_mode);
         u64 sz = isDir ? 0 : (u64)st.st_size;
-        u32 h = getOrRegisterHandle(fp, parentHandle, e->d_name, isDir, sz, st.st_mtime);
+        u32 h = getOrRegisterHandle(storage, fp, parentHandle, e->d_name, isDir, sz, st.st_mtime);
         handles.push_back(h);
     }
     closedir(d);
@@ -352,12 +365,57 @@ inline std::vector<u8> dsDeviceInfo() {
 }
 
 inline std::vector<u8> dsStorageIDs() {
-    std::vector<u8> v; put32(v, 1); put32(v, MTP_STORAGE); return v;
+    AppConfig& cfg = AppConfig::get();
+    cfg.load();
+    std::vector<u32> sids;
+    if (cfg.mtpShowSD) sids.push_back(STORAGE_SD);
+    if (cfg.mtpShowAlbum) sids.push_back(STORAGE_ALBUM);
+    if (cfg.mtpEnableInstaller) sids.push_back(STORAGE_INSTALL);
+    if (cfg.mtpShowNANDUser) sids.push_back(STORAGE_NAND);
+    if (sids.empty()) sids.push_back(STORAGE_SD);
+
+    std::vector<u8> v;
+    put32(v, (u32)sids.size());
+    for (u32 sid : sids) put32(v, sid);
+    return v;
 }
 
-inline std::vector<u8> dsStorageInfo() {
-    struct statvfs sv; u64 cap = 0, fr = 0;
-    if (statvfs("sdmc:/", &sv) == 0) { cap = (u64)sv.f_blocks * sv.f_frsize; fr = (u64)sv.f_bavail * sv.f_frsize; }
+inline std::vector<u8> dsStorageInfo(u32 storage_id) {
+    struct statvfs sv;
+    u64 cap = 0, fr = 0;
+    std::string desc = "1: MicroSD";
+    std::string name = "sdcard";
+
+    if (storage_id == STORAGE_SD) {
+        if (statvfs("sdmc:/", &sv) == 0) {
+            cap = (u64)sv.f_blocks * sv.f_frsize;
+            fr = (u64)sv.f_bavail * sv.f_frsize;
+        }
+        desc = "1: MicroSD";
+        name = "sdcard";
+    } else if (storage_id == STORAGE_ALBUM) {
+        if (statvfs("sdmc:/", &sv) == 0) {
+            cap = (u64)sv.f_blocks * sv.f_frsize;
+            fr = (u64)sv.f_bavail * sv.f_frsize;
+        }
+        desc = "2: Album y Capturas";
+        name = "album";
+    } else if (storage_id == STORAGE_INSTALL) {
+        if (statvfs("sdmc:/", &sv) == 0) {
+            cap = (u64)sv.f_blocks * sv.f_frsize;
+            fr = (u64)sv.f_bavail * sv.f_frsize;
+        }
+        desc = "3: Instalador (Drop NSP/NSZ)";
+        name = "installer";
+    } else if (storage_id == STORAGE_NAND) {
+        if (statvfs("user:/", &sv) == 0) {
+            cap = (u64)sv.f_blocks * sv.f_frsize;
+            fr = (u64)sv.f_bavail * sv.f_frsize;
+        }
+        desc = "4: Memoria NAND (User)";
+        name = "nand";
+    }
+
     std::vector<u8> v;
     put16(v, 0x0004); // FixedRAM
     put16(v, 0x0003); // GenericHierarchical
@@ -365,14 +423,14 @@ inline std::vector<u8> dsStorageInfo() {
     put64(v, cap);
     put64(v, fr);
     put32(v, 0xFFFFFFFF); // Free images
-    putStr(v, "Nintendo Switch SD");
-    putStr(v, "sdcard");
+    putStr(v, desc.c_str());
+    putStr(v, name.c_str());
     return v;
 }
 
 inline std::vector<u8> dsObjectInfo(const MtpObj& o) {
     std::vector<u8> v;
-    put32(v, MTP_STORAGE);
+    put32(v, o.storage);
     put16(v, o.dir ? F_Association : F_Undefined);
     put16(v, 0); // protección
     u32 sz = o.size > 0xFFFFFFFFULL ? 0xFFFFFFFFUL : (u32)o.size;
@@ -381,7 +439,7 @@ inline std::vector<u8> dsObjectInfo(const MtpObj& o) {
     put32(v, o.parent);
     put16(v, o.dir ? 1 : 0); put32(v, 0); put32(v, 0); // assoc
     putStr(v, o.name.c_str());
-    char d[24]; mtpDateStr(o.mtime, d, sizeof(d));
+    char d[32]; mtpDateStr(o.mtime, d, sizeof(d));
     putStr(v, d); putStr(v, d); putEmptyStr(v);
     return v;
 }
@@ -396,8 +454,6 @@ inline const u16 kSupportedProps[] = {
 inline void worker() {
     g_active = true;
     mtp_usb::mlog("MTP worker iniciado");
-    std::string pendingPath;
-    bool hasPending = false;
 
     // Buffer de 4KB alineado para recepción continua sin cortes de USB
     alignas(0x1000) static u8 s_rxBuf[0x1000];
@@ -445,13 +501,31 @@ inline void worker() {
             if (sendData(code, tx, d)) sendResponse(tx, MR_OK, nullptr, 0);
             break;
         }
-        case OP_OpenSession:
+        case OP_OpenSession: {
             g_session = len >= 16 ? P(0) : 1;
             g_objs.clear();
             g_nextHandle = 1;
-            mtpScanDirectory("sdmc:/", 0); // Cargar sólo la raíz (1 ms)
+            AppConfig::get().load();
+            if (AppConfig::get().mtpShowSD) {
+                mtpScanDirectory(STORAGE_SD, "sdmc:/", 0);
+            }
+            if (AppConfig::get().mtpShowAlbum) {
+                mkdir("sdmc:/Nintendo", 0777);
+                mkdir("sdmc:/Nintendo/Album", 0777);
+                mtpScanDirectory(STORAGE_ALBUM, "sdmc:/Nintendo/Album", 0);
+            }
+            if (AppConfig::get().mtpEnableInstaller) {
+                mkdir("sdmc:/switch", 0777);
+                mkdir("sdmc:/switch/EzFiles", 0777);
+                mkdir("sdmc:/switch/EzFiles/install", 0777);
+                mtpScanDirectory(STORAGE_INSTALL, "sdmc:/switch/EzFiles/install", 0);
+            }
+            if (AppConfig::get().mtpShowNANDUser) {
+                mtpScanDirectory(STORAGE_NAND, "user:/", 0);
+            }
             sendResponse(tx, MR_OK, nullptr, 0);
             break;
+        }
         case OP_CloseSession:
             g_session = 0;
             g_objs.clear();
@@ -463,35 +537,54 @@ inline void worker() {
             break;
         }
         case OP_GetStorageInfo: {
-            if (len >= 16 && P(0) != MTP_STORAGE && P(0) != 0xFFFFFFFF) {
-                sendResponse(tx, MR_InvalidStorage, nullptr, 0);
-                break;
-            }
-            auto d = dsStorageInfo();
+            u32 sid = len >= 16 ? P(0) : STORAGE_SD;
+            auto d = dsStorageInfo(sid);
             if (sendData(code, tx, d)) sendResponse(tx, MR_OK, nullptr, 0);
             break;
         }
         case OP_GetNumObjects:
         case OP_GetObjectHandles: {
+            u32 storage = len >= 16 ? P(0) : 0xFFFFFFFF;
             u32 parent = len >= 24 ? P(2) : 0xFFFFFFFF;
             u32 targetParent = 0;
             std::string scanPath = "sdmc:/";
+            u32 targetStorage = STORAGE_SD;
+
             if (parent != 0 && parent != 0xFFFFFFFF) {
                 const MtpObj* po = mtpFind(parent);
                 if (po && po->dir) {
                     scanPath = po->path;
                     targetParent = po->handle;
+                    targetStorage = po->storage;
+                }
+            } else {
+                if (storage == STORAGE_ALBUM) {
+                    scanPath = "sdmc:/Nintendo/Album";
+                    targetStorage = STORAGE_ALBUM;
+                } else if (storage == STORAGE_INSTALL) {
+                    mkdir("sdmc:/switch", 0777);
+                    mkdir("sdmc:/switch/EzFiles", 0777);
+                    mkdir("sdmc:/switch/EzFiles/install", 0777);
+                    scanPath = "sdmc:/switch/EzFiles/install";
+                    targetStorage = STORAGE_INSTALL;
+                } else if (storage == STORAGE_NAND) {
+                    scanPath = "user:/";
+                    targetStorage = STORAGE_NAND;
+                } else {
+                    scanPath = "sdmc:/";
+                    targetStorage = STORAGE_SD;
                 }
             }
 
             // Buscar en caché si la carpeta ya fue escaneada
             std::vector<u32> hs;
             for (auto& o : g_objs) {
-                if (o.parent == targetParent) hs.push_back(o.handle);
+                if (o.parent == targetParent && (storage == 0xFFFFFFFF || o.storage == targetStorage)) {
+                    hs.push_back(o.handle);
+                }
             }
-            // Si es la primera vez que se accede a esta carpeta, escanearla en disco
             if (hs.empty()) {
-                hs = mtpScanDirectory(scanPath, targetParent);
+                hs = mtpScanDirectory(targetStorage, scanPath, targetParent);
             }
 
             if (code == OP_GetNumObjects) {
@@ -526,6 +619,140 @@ inline void worker() {
             sendResponse(tx, ok ? MR_OK : MR_GeneralError, nullptr, 0);
             break;
         }
+        case OP_SendObjectInfo: {
+            u32 reqStorage = len >= 16 ? P(0) : STORAGE_SD;
+            u32 parentH    = len >= 20 ? P(1) : 0;
+
+            alignas(0x1000) static u8 s_infoBuf[0x1000];
+            size_t infoGot = usbMtpTransfer(MTP_EP_BULK_OUT, 0, s_infoBuf, sizeof(s_infoBuf), 5000000000ULL);
+            if (infoGot < 65) {
+                sendResponse(tx, MR_GeneralError, nullptr, 0);
+                break;
+            }
+
+            u32 targetStorage = rd32(s_infoBuf + 12);
+            if (targetStorage == 0 || targetStorage == 0xFFFFFFFF) targetStorage = reqStorage;
+
+            u16 objFormat = rd16(s_infoBuf + 16);
+            u32 compSize  = rd32(s_infoBuf + 20);
+            std::string filename = getMtpStr(s_infoBuf + 64, infoGot - 64);
+            if (filename.empty()) filename = "nuevo_archivo";
+
+            std::string parentPath = "sdmc:/";
+            if (targetStorage == STORAGE_ALBUM) parentPath = "sdmc:/Nintendo/Album";
+            else if (targetStorage == STORAGE_INSTALL) {
+                mkdir("sdmc:/switch", 0777);
+                mkdir("sdmc:/switch/EzFiles", 0777);
+                mkdir("sdmc:/switch/EzFiles/install", 0777);
+                parentPath = "sdmc:/switch/EzFiles/install";
+            } else if (targetStorage == STORAGE_NAND) parentPath = "user:/";
+
+            if (parentH != 0 && parentH != 0xFFFFFFFF) {
+                const MtpObj* po = mtpFind(parentH);
+                if (po && po->dir) parentPath = po->path;
+            }
+
+            std::string targetPath = mtpJoin(parentPath, filename);
+
+            if (objFormat == F_Association) {
+                mkdir(targetPath.c_str(), 0777);
+                u32 newH = getOrRegisterHandle(targetStorage, targetPath, parentH, filename, true, 0, time(nullptr));
+                u32 resParams[3] = { targetStorage, parentH, newH };
+                sendResponse(tx, MR_OK, resParams, 3);
+            } else {
+                FILE* f = fopen(targetPath.c_str(), "wb");
+                if (f) fclose(f);
+                u32 newH = getOrRegisterHandle(targetStorage, targetPath, parentH, filename, false, compSize, time(nullptr));
+                g_pendingSendId = newH;
+                g_pendingSendPath = targetPath;
+                g_pendingSendSize = compSize;
+                g_pendingSendStorage = targetStorage;
+
+                u32 resParams[3] = { targetStorage, parentH, newH };
+                sendResponse(tx, MR_OK, resParams, 3);
+            }
+            break;
+        }
+        case OP_SendObject: {
+            if (g_pendingSendPath.empty()) {
+                sendResponse(tx, MR_GeneralError, nullptr, 0);
+                break;
+            }
+
+            FILE* f = fopen(g_pendingSendPath.c_str(), "wb");
+            if (!f) {
+                sendResponse(tx, MR_GeneralError, nullptr, 0);
+                g_pendingSendPath = "";
+                break;
+            }
+
+            char logMsg[128];
+            snprintf(logMsg, sizeof(logMsg), "MTP RECV %s...", g_pendingSendPath.c_str());
+            mtp_usb::mlog(logMsg);
+
+            alignas(0x1000) static u8 s_recvDataBuf[0x10000];
+            size_t firstGot = usbMtpTransfer(MTP_EP_BULK_OUT, 0, s_recvDataBuf, sizeof(s_recvDataBuf), 5000000000ULL);
+            if (firstGot < 12) {
+                fclose(f);
+                sendResponse(tx, MR_IncompleteTransfer, nullptr, 0);
+                g_pendingSendPath = "";
+                break;
+            }
+
+            u32 dataLen = rd32(s_recvDataBuf);
+            u64 totalExpected = (dataLen == 0xFFFFFFFF) ? 0xFFFFFFFFFFFFFFFFULL : (u64)(dataLen - 12);
+            u64 totalReceived = 0;
+
+            if (firstGot > 12) {
+                size_t payloadInFirst = firstGot - 12;
+                fwrite(s_recvDataBuf + 12, 1, payloadInFirst, f);
+                totalReceived += payloadInFirst;
+            }
+
+            while (g_run && (totalExpected == 0xFFFFFFFFFFFFFFFFULL || totalReceived < totalExpected)) {
+                size_t toRead = sizeof(s_recvDataBuf);
+                if (totalExpected != 0xFFFFFFFFFFFFFFFFULL) {
+                    u64 rem = totalExpected - totalReceived;
+                    if (rem < toRead) toRead = (size_t)rem;
+                }
+
+                size_t got = usbMtpTransfer(MTP_EP_BULK_OUT, 0, s_recvDataBuf, toRead, 5000000000ULL);
+                if (got == 0) break;
+
+                fwrite(s_recvDataBuf, 1, got, f);
+                totalReceived += got;
+
+                if (got < toRead) break;
+            }
+
+            fclose(f);
+
+            struct stat st;
+            if (stat(g_pendingSendPath.c_str(), &st) == 0) {
+                for (auto& o : g_objs) {
+                    if (o.handle == g_pendingSendId) {
+                        o.size = (u64)st.st_size;
+                        o.mtime = st.st_mtime;
+                        break;
+                    }
+                }
+            }
+
+            if (g_pendingSendStorage == STORAGE_INSTALL) {
+                snprintf(logMsg, sizeof(logMsg), "Instalador: %s recibido (%llu MB)",
+                         g_pendingSendPath.substr(g_pendingSendPath.find_last_of('/') + 1).c_str(),
+                         (unsigned long long)(totalReceived / (1024 * 1024)));
+                mtp_usb::mlog(logMsg);
+            } else {
+                snprintf(logMsg, sizeof(logMsg), "MTP: Guardado %llu bytes", (unsigned long long)totalReceived);
+                mtp_usb::mlog(logMsg);
+            }
+
+            g_pendingSendPath = "";
+            g_pendingSendId = 0;
+            sendResponse(tx, MR_OK, nullptr, 0);
+            break;
+        }
 
         // --- Extensiones de Propiedades MTP (0x98XX para Windows Explorer) ---
         case OP_MtpGetObjectPropsSupported: {
@@ -541,7 +768,7 @@ inline void worker() {
             put16(d, prop); // PropertyCode
             switch (prop) {
             case PROP_StorageId:
-                put16(d, TYPE_U32); put8(d, 0); put32(d, MTP_STORAGE); break;
+                put16(d, TYPE_U32); put8(d, 0); put32(d, STORAGE_SD); break;
             case PROP_ObjectFormat:
                 put16(d, TYPE_U16); put8(d, 0); put16(d, 0); break;
             case PROP_ObjectCompressedSize:
@@ -569,7 +796,7 @@ inline void worker() {
             std::vector<u8> d;
             switch (prop) {
             case PROP_StorageId:
-                put32(d, MTP_STORAGE); break;
+                put32(d, o->storage); break;
             case PROP_ObjectFormat:
                 put16(d, o->dir ? F_Association : F_Undefined); break;
             case PROP_ObjectCompressedSize:
@@ -612,7 +839,7 @@ inline void worker() {
                 fn(elemBuf);
                 count++;
             };
-            emit(PROP_StorageId, TYPE_U32, [](std::vector<u8>& b) { put32(b, MTP_STORAGE); });
+            emit(PROP_StorageId, TYPE_U32, [&](std::vector<u8>& b) { put32(b, o->storage); });
             emit(PROP_ObjectFormat, TYPE_U16, [&](std::vector<u8>& b) { put16(b, o->dir ? F_Association : F_Undefined); });
             emit(PROP_ObjectCompressedSize, TYPE_U64, [&](std::vector<u8>& b) { put64(b, o->size); });
             emit(PROP_ParentObject, TYPE_U32, [&](std::vector<u8>& b) { put32(b, o->parent); });

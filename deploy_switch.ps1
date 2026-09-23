@@ -7,7 +7,7 @@ if (-not $switch) {
     exit 1
 }
 
-$sd = $switch.GetFolder.Items() | Where-Object { $_.Name -like "*1: SD Card*" } | Select-Object -First 1
+$sd = $switch.GetFolder.Items() | Where-Object { $_.Name -like "*SD*" -or $_.Name -like "*MicroSD*" } | Select-Object -First 1
 $switchFolder = $sd.GetFolder.Items() | Where-Object { $_.Name -eq "switch" } | Select-Object -First 1
 
 $nroSrc = "C:\Projects\c++\EzFiles\EzFiles.nro"

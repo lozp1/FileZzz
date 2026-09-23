@@ -1,0 +1,66 @@
+<brls:Box
+    xmlns:brls="http://borealis.org/borealis"
+    width="auto"
+    height="auto"
+    axis="column"
+    paddingTop="20px"
+    paddingLeft="40px"
+    paddingRight="40px"
+    paddingBottom="20px">
+
+    <brls:Header
+        title="Transferencia USB MTP"
+        subtitle="Conecta la consola a tu PC con un cable USB-C de datos" />
+
+    <brls:Box
+        width="auto"
+        height="auto"
+        axis="row"
+        justifyContent="spaceBetween"
+        alignItems="center"
+        marginTop="20px"
+        padding="20px"
+        cornerRadius="8px"
+        backgroundColor="#1A1D24">
+
+        <brls:Box axis="column">
+            <brls:Label
+                id="lblMtpStatus"
+                text="Estado: Esperando conexión..."
+                fontSize="22px"
+                textColor="#10B981" />
+            <brls:Label
+                id="lblMtpInfo"
+                text="Particiones activas: MicroSD, Álbum, Instalador"
+                fontSize="16px"
+                textColor="#9CA3AF"
+                marginTop="6px" />
+        </brls:Box>
+
+        <brls:Button
+            id="btnToggleMtp"
+            text="Detener MTP"
+            width="200px"
+            height="50px" />
+    </brls:Box>
+
+    <brls:Header
+        title="Registro de Actividad"
+        marginTop="30px" />
+
+    <brls:Box
+        id="boxMtpLogs"
+        width="auto"
+        height="320px"
+        axis="column"
+        padding="15px"
+        cornerRadius="8px"
+        backgroundColor="#0F1117">
+        <brls:Label
+            id="lblLogContent"
+            text="[MTP] Servicio iniciado y listo para recibir conexiones."
+            fontSize="14px"
+            textColor="#D1D5DB" />
+    </brls:Box>
+
+</brls:Box>

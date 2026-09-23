@@ -17,6 +17,7 @@
 #include <cmath>
 #include <unordered_map>
 
+#include "config.hpp"
 #include "theme.hpp"
 #include "i18n.hpp"
 #include "sound.hpp"
@@ -475,6 +476,7 @@ int main(int argc, char* argv[]) {
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
     PadState pad;
     padInitializeDefault(&pad);
+    AppConfig::get().load();
 
     AppScreen currentScreen = SCREEN_SPLASH;
     int menuIdx = 0;

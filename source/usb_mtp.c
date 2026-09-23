@@ -8,6 +8,7 @@
 #include "usb_mtp.h"
 
 #define TOTAL_ENDPOINTS 3
+#define MTP_TRANSFER_BUFFER_SIZE 0x10000 // 64 KB DMA buffer
 
 typedef struct {
     UsbDsEndpoint *endpoint;
@@ -113,11 +114,11 @@ Result usbMtpInitialize(void)
         .bMaxBurst = 0x00, .bmAttributes = 0x00, .wBytesPerInterval = 0x00
     };
 
-    /* Buferes de transferencia de 4KB alineados */
+    /* Buferes de transferencia de 64KB alineados para DMA de alta velocidad */
     for (u32 i = 0; i < TOTAL_ENDPOINTS && R_SUCCEEDED(rc); i++) {
-        g_mtpEndpoints[i].buffer = (u8*)memalign(0x1000, 0x1000);
+        g_mtpEndpoints[i].buffer = (u8*)memalign(0x1000, MTP_TRANSFER_BUFFER_SIZE);
         if (!g_mtpEndpoints[i].buffer) { rc = MAKERESULT(Module_Libnx, LibnxError_OutOfMemory); break; }
-        memset(g_mtpEndpoints[i].buffer, 0, 0x1000);
+        memset(g_mtpEndpoints[i].buffer, 0, MTP_TRANSFER_BUFFER_SIZE);
     }
 
     if (R_SUCCEEDED(rc)) rc = usbDsRegisterInterface(&g_mtpInterface);
@@ -218,29 +219,21 @@ size_t usbMtpTransfer(u32 endpoint, int isWrite, void* buffer, size_t size, u64 
 
     Result rc = 0;
     u32 urbId = 0, chunksize = 0;
-    u8 transfer_type = 0;
-    u8 *bufptr = (u8*)buffer, *transfer_buffer = NULL;
+    u8 *bufptr = (u8*)buffer;
     u32 tmp_sz = 0;
     size_t total = 0;
     UsbDsReportData reportdata;
 
     while (size > 0) {
-        if (((u64)bufptr) & 0xfff) {
-            transfer_buffer = ep->buffer;
-            memset(ep->buffer, 0, 0x1000);
-            chunksize = (u32)(0x1000 - (((u64)bufptr) & 0xfff));
-            if ((u32)size < chunksize) chunksize = (u32)size;
-            if (isWrite) memcpy(ep->buffer, bufptr, chunksize);
-            transfer_type = 0;
-        } else {
-            transfer_buffer = bufptr;
-            chunksize = (u32)size;
-            if (chunksize > 0x1000) chunksize = 0x1000;
-            transfer_type = 1;
+        chunksize = (u32)size;
+        if (chunksize > MTP_TRANSFER_BUFFER_SIZE) chunksize = MTP_TRANSFER_BUFFER_SIZE;
+
+        if (isWrite) {
+            memcpy(ep->buffer, bufptr, chunksize);
         }
 
         eventClear(&ep->endpoint->CompletionEvent);
-        rc = usbDsEndpoint_PostBufferAsync(ep->endpoint, transfer_buffer, chunksize, &urbId);
+        rc = usbDsEndpoint_PostBufferAsync(ep->endpoint, ep->buffer, chunksize, &urbId);
         if (R_FAILED(rc)) break;
 
         rc = eventWait(&ep->endpoint->CompletionEvent, timeout_ns);
@@ -259,7 +252,9 @@ size_t usbMtpTransfer(u32 endpoint, int isWrite, void* buffer, size_t size, u64 
 
         if (tmp_sz > chunksize) tmp_sz = chunksize;
         total += (size_t)tmp_sz;
-        if (transfer_type == 0 && !isWrite) memcpy(bufptr, transfer_buffer, tmp_sz);
+        if (!isWrite) {
+            memcpy(bufptr, ep->buffer, tmp_sz);
+        }
         bufptr += tmp_sz;
         size   -= tmp_sz;
         if (tmp_sz < chunksize) break;

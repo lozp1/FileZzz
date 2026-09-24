@@ -1,0 +1,6 @@
+*.nro
+*.elf
+*.o
+*.log
+.DS_Store
+Thumbs.db

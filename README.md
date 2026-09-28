@@ -22,7 +22,7 @@
 
 <p align="center">
   <b>FileZzz</b> es una suite todo-en-uno de gestión de almacenamiento, exploración y transferencia de datos diseñada exclusivamente para <b>Nintendo Switch (Horizon OS)</b>.
-  Nace como una alternativa moderna, fluida y <b>100% traducida al español y multilenguaje</b> frente a herramientas clásicas como DBI, superando las barreras idiomáticas, las interfaces obsoletas y las ralentizaciones del sistema con un rendimiento impecable a <b>60 FPS</b>.
+  Ofrece una experiencia moderna, fluida y <b>100% traducida al español y multilenguaje</b>, combinando una interfaz visual intuitiva, personalización avanzada y un rendimiento impecable a <b>60 FPS</b>.
 </p>
 
 [✨ Características](#-características-principales) •
@@ -39,7 +39,7 @@
 
 ## 🌟 Características Principales
 
-- 📂 **Explorador de Archivos y Particiones DBI-Style:** Acceso directo a la microSD física (`sdmc:/`) y montaje dinámico de las 8 particiones virtuales de la consola:
+- 📂 **Explorador de Archivos y Particiones Virtuales:** Acceso directo a la microSD física (`sdmc:/`) y montaje dinámico de las 8 particiones virtuales de la consola:
   - `1: SD Card` (Almacenamiento microSD completo con lectura y escritura).
   - `2: 1: Nand (USER)` (Partición interna de usuario: partidas guardadas y capturas).
   - `3: 2: Nand (SYSTEM)` (Archivos esenciales de Horizon OS en modo solo lectura).
@@ -66,7 +66,7 @@
 <div align="center">
 
 ### 1. Explorador de Archivos y Particiones Virtuales
-Exploración nativa de la tarjeta microSD y acceso directo a las 8 particiones del sistema estilo DBI.
+Exploración nativa de la tarjeta microSD y acceso directo a las 8 particiones virtuales del sistema.
 
 <img src="screenshots/01_explorador_archivos_particiones.jpg" width="850" alt="Explorador de Archivos y Particiones Virtuales" />
 

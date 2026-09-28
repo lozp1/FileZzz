@@ -2,74 +2,196 @@
     width="auto"
     height="auto"
     axis="column"
-    paddingTop="20px"
+    paddingTop="25px"
     paddingLeft="40px"
     paddingRight="40px"
     paddingBottom="20px">
 
-    <brls:Header
-        title="Transferencia USB MTP" />
-    <brls:Label
-        text="Conecta la consola a tu PC con un cable USB-C de datos"
-        fontSize="15px"
-        textColor="@theme/brls/header/subtitle"
-        marginTop="4px" />
-
+    <!-- Encabezado estilo Switch Horizon OS con línea divisoria -->
     <brls:Box
-        width="auto"
+        width="100%"
         height="auto"
         axis="column"
-        marginTop="20px"
-        padding="20px"
-        cornerRadius="8px"
-        backgroundColor="@theme/brls/sidebar/background">
-
+        marginBottom="20px">
         <brls:Box
             width="auto"
             height="auto"
             axis="row"
-            justifyContent="spaceBetween"
-            alignItems="center">
-
+            alignItems="center"
+            marginBottom="12px">
+            <brls:Rectangle
+                width="4px"
+                height="22px"
+                color="#00F2FE"
+                marginRight="12px" />
             <brls:Label
-                id="lblMtpStatus"
-                text="Estado: En espera de conexion USB"
-                fontSize="22px"
-                textColor="#10B981" />
+                text="@i18n/hints/mtp_title"
+                fontSize="24px"
+                textColor="@theme/brls/text" />
+        </brls:Box>
+        <brls:Box
+            width="100%"
+            height="1px"
+            backgroundColor="@theme/brls/sidebar/separator" />
+    </brls:Box>
 
-            <brls:Button
+    <!-- Tarjeta Superior: Control de Conexión y Estado -->
+    <brls:Box
+        width="100%"
+        height="auto"
+        axis="column"
+        padding="20px"
+        cornerRadius="8px"
+        backgroundColor="@theme/brls/sidebar/background"
+        marginBottom="18px">
+
+        <brls:Box
+            width="100%"
+            height="auto"
+            axis="row"
+            justifyContent="spaceBetween"
+            alignItems="center"
+            marginBottom="14px">
+
+            <!-- Estado de Conexión -->
+            <brls:Box
+                width="auto"
+                height="auto"
+                axis="row"
+                alignItems="center">
+                <brls:Label
+                    text="Estado del Servidor USB: "
+                    fontSize="18px"
+                    textColor="@theme/brls/text_disabled"
+                    marginRight="8px" />
+                <brls:Label
+                    id="lblMtpStatus"
+                    text="@i18n/hints/mtp_status_idle"
+                    fontSize="18px"
+                    textColor="#9CA3AF" />
+            </brls:Box>
+
+            <!-- Botón Principal Iniciar / Detener MTP -->
+            <brls:Box
                 id="btnToggleMtp"
-                text="Detener MTP"
-                width="180px"
-                height="44px" />
+                width="280px"
+                height="48px"
+                focusable="true"
+                cornerRadius="6px"
+                backgroundColor="#0284C7"
+                justifyContent="center"
+                alignItems="center">
+                <brls:Label
+                    id="lblMtpBtnText"
+                    text="@i18n/hints/mtp_btn_start"
+                    fontSize="17px"
+                    textColor="#FFFFFF" />
+            </brls:Box>
+
         </brls:Box>
 
-        <brls:Label
-            id="lblMtpInfo"
-            text="8 Particiones: SD, User, System, Juegos, Install SD/NAND, Saves, Album"
-            fontSize="16px"
-            textColor="@theme/brls/text_disabled"
-            marginTop="12px" />
+        <brls:Box width="100%" height="1px" backgroundColor="@theme/brls/sidebar/separator" marginBottom="12px" />
+
+        <!-- Info secundaria sin textos rotos ni emojis -->
+        <brls:Box
+            width="100%"
+            height="auto"
+            axis="row"
+            justifyContent="spaceBetween"
+            alignItems="center">
+            <brls:Label
+                text="Modo: libnx USB MTP Responder"
+                fontSize="14px"
+                textColor="@theme/brls/text_disabled" />
+            <brls:Label
+                text="Particiones: MicroSD, User, System, Games, Saves"
+                fontSize="14px"
+                textColor="@theme/brls/text_disabled" />
+        </brls:Box>
 
     </brls:Box>
 
-    <brls:Header
-        title="Registro de Actividad"
-        marginTop="25px" />
-
+    <!-- Tarjeta Central: Telemetría de Transferencia en Tiempo Real -->
     <brls:Box
-        id="boxMtpLogs"
-        width="auto"
-        height="320px"
+        width="100%"
+        height="auto"
         axis="column"
-        padding="15px"
+        padding="20px"
         cornerRadius="8px"
-        backgroundColor="@theme/brls/background">
+        backgroundColor="@theme/brls/sidebar/background"
+        marginBottom="18px">
+
         <brls:Label
-            id="lblLogContent"
-            text="[MTP] Servicio iniciado y listo para recibir conexiones."
+            text="Transferencia Activa"
+            fontSize="15px"
+            textColor="@theme/brls/text_disabled"
+            marginBottom="8px" />
+
+        <brls:Label
+            id="lblMtpFilename"
+            text="En espera de conexión USB..."
+            fontSize="18px"
+            textColor="@theme/brls/text"
+            marginBottom="12px" />
+
+        <!-- Barra de Progreso Dinámica -->
+        <brls:Box
+            width="100%"
+            height="12px"
+            cornerRadius="6px"
+            backgroundColor="#2A2E39"
+            marginBottom="10px">
+            <brls:Box
+                id="boxMtpProgressFill"
+                width="0%"
+                height="12px"
+                cornerRadius="6px"
+                backgroundColor="#00F2FE" />
+        </brls:Box>
+
+        <brls:Label
+            id="lblMtpStats"
+            text="Conecta el cable USB a tu PC o teléfono para transferir archivos."
             fontSize="14px"
-            textColor="@theme/brls/text" />
+            textColor="@theme/brls/text_disabled" />
+
+    </brls:Box>
+
+    <!-- Tarjeta Inferior: Consola de Actividad MTP -->
+    <brls:Box
+        width="100%"
+        height="auto"
+        axis="column"
+        padding="18px"
+        cornerRadius="8px"
+        backgroundColor="@theme/brls/sidebar/background">
+
+        <brls:Label
+            text="@i18n/hints/mtp_log_title"
+            fontSize="15px"
+            textColor="@theme/brls/text_disabled"
+            marginBottom="10px" />
+
+        <brls:ScrollingFrame
+            width="100%"
+            height="180px">
+            <brls:Box
+                id="boxMtpLogs"
+                width="100%"
+                height="auto"
+                axis="column"
+                padding="10px"
+                cornerRadius="6px"
+                backgroundColor="#1A1D24">
+                <brls:Label
+                    id="lblLogContent"
+                    text="@i18n/hints/mtp_log_idle"
+                    fontSize="13px"
+                    lineHeight="1.4"
+                    textColor="#9CA3AF" />
+            </brls:Box>
+        </brls:ScrollingFrame>
+
     </brls:Box>
 
 </brls:Box>

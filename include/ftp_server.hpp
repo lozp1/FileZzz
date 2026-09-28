@@ -18,6 +18,8 @@
 
 #include <cerrno>
 #include <sys/select.h>
+#include "config.hpp"
+#include "sys_clock.hpp"
 
 namespace ftp_server {
 
@@ -129,7 +131,7 @@ inline void handleClient(int clientSock, u32 localIpU32) {
     setsockopt(clientSock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&rtv, sizeof(rtv));
 
     flog("FTP cliente conectado (" + peerIpStr(clientSock) + ")");
-    sendResponse(clientSock, "220 EzFiles Andromeda FTP Server Ready");
+    sendResponse(clientSock, "220 FileZzz FTP Server Ready");
 
     char buf[2048];
     while (g_running) {
@@ -167,7 +169,12 @@ inline void handleClient(int clientSock, u32 localIpU32) {
                 providedUser = arg;
                 sendResponse(clientSock, "331 User name okay, need password.");
             } else if (cmd == "PASS") {
-                if (!providedUser.empty() && providedUser == g_ftpUser && arg == g_ftpPass) {
+                std::string expUser = !AppConfig::get().ftpUsername.empty() ? AppConfig::get().ftpUsername : g_ftpUser;
+                std::string expPass = !AppConfig::get().ftpPassword.empty() ? AppConfig::get().ftpPassword : g_ftpPass;
+                bool allowAnon = AppConfig::get().ftpAnonLogin && (providedUser == "anonymous" || providedUser.empty());
+                bool matchCreds = (!providedUser.empty() && providedUser == expUser && (expPass.empty() || arg == expPass));
+
+                if (allowAnon || matchCreds) {
                     loggedIn = true;
                     flog("FTP login OK (" + providedUser + ")");
                     sendResponse(clientSock, "230 User logged in, proceed.");
@@ -491,6 +498,7 @@ inline void serverLoop() {
 
 inline bool start(int port = 5000) {
     if (g_running) return true;
+    sys_clock::enableBoost();
     g_listenPort = port;
     g_currentIp = getRealIp();
     g_running = true;
@@ -512,6 +520,7 @@ inline void stop() {
     if (g_serverThread.joinable()) {
         g_serverThread.join();
     }
+    sys_clock::disableBoost();
 }
 
 } // namespace ftp_server

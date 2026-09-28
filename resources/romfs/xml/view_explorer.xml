@@ -2,33 +2,132 @@
     width="auto"
     height="auto"
     axis="column"
-    paddingTop="20px"
+    paddingTop="25px"
     paddingLeft="40px"
     paddingRight="40px"
     paddingBottom="20px">
 
+    <!-- Encabezado estilo Switch Horizon OS con barra elegante -->
     <brls:Box
-        width="auto"
+        width="100%"
+        height="auto"
+        axis="column"
+        marginBottom="18px">
+        <brls:Box
+            width="auto"
+            height="auto"
+            axis="row"
+            alignItems="center"
+            marginBottom="12px">
+            <brls:Rectangle
+                width="4px"
+                height="22px"
+                color="#00F2FE"
+                marginRight="12px" />
+            <brls:Label
+                text="@i18n/hints/explorer_title"
+                fontSize="24px"
+                textColor="@theme/brls/text" />
+        </brls:Box>
+        <brls:Box
+            width="100%"
+            height="1px"
+            backgroundColor="@theme/brls/sidebar/separator" />
+    </brls:Box>
+
+    <!-- Barra de ruta actual y barra de acciones rápidas superior -->
+    <brls:Box
+        width="100%"
         height="auto"
         axis="row"
         justifyContent="spaceBetween"
-        alignItems="center">
-        <brls:Label
-            id="lblCurrentPath"
-            text="sdmc:/"
-            fontSize="20px"
-            textColor="#38BDF8" />
-        <brls:Label
-            id="lblItemCount"
-            text="0 elementos"
-            fontSize="16px"
-            textColor="@theme/brls/text_disabled" />
+        alignItems="center"
+        marginBottom="12px">
+
+        <brls:Box
+            width="auto"
+            height="auto"
+            axis="row"
+            alignItems="center">
+            <brls:Label
+                id="lblCurrentPath"
+                text="sdmc:/"
+                fontSize="18px"
+                textColor="#38BDF8"
+                marginRight="15px" />
+            <brls:Label
+                id="lblItemCount"
+                text="0 elementos"
+                fontSize="14px"
+                textColor="@theme/brls/text_disabled" />
+        </brls:Box>
+
+        <!-- Botones de Acción Superior (descongestionan el footer inferior) -->
+        <brls:Box
+            width="auto"
+            height="auto"
+            axis="row"
+            alignItems="center">
+            <brls:Box
+                id="btnTopSelect"
+                width="auto"
+                height="32px"
+                focusable="true"
+                cornerRadius="4px"
+                paddingLeft="12px"
+                paddingRight="12px"
+                backgroundColor="@theme/brls/sidebar/background"
+                alignItems="center"
+                justifyContent="center"
+                marginRight="10px">
+                <brls:Label
+                    id="lblTopSelectText"
+                    text="[X] Seleccionar"
+                    fontSize="13px"
+                    textColor="@theme/brls/text" />
+            </brls:Box>
+            <brls:Box
+                id="btnTopPaste"
+                width="auto"
+                height="32px"
+                focusable="true"
+                cornerRadius="4px"
+                paddingLeft="12px"
+                paddingRight="12px"
+                backgroundColor="@theme/brls/sidebar/background"
+                alignItems="center"
+                justifyContent="center"
+                marginRight="10px">
+                <brls:Label
+                    id="lblTopPasteText"
+                    text="[Y] Pegar"
+                    fontSize="13px"
+                    textColor="@theme/brls/text" />
+            </brls:Box>
+            <brls:Box
+                id="btnTopOptions"
+                width="auto"
+                height="32px"
+                focusable="true"
+                cornerRadius="4px"
+                paddingLeft="12px"
+                paddingRight="12px"
+                backgroundColor="@theme/brls/sidebar/background"
+                alignItems="center"
+                justifyContent="center">
+                <brls:Label
+                    text="[+] Opciones"
+                    fontSize="13px"
+                    textColor="@theme/brls/text" />
+            </brls:Box>
+        </brls:Box>
+
     </brls:Box>
 
     <brls:ScrollingFrame
+        id="scrollFiles"
         width="auto"
-        height="500px"
-        marginTop="15px">
+        height="500px">
         <brls:Box
             id="boxFiles"
             width="auto"

@@ -17,7 +17,7 @@ Requiere [devkitPro](https://devkitpro.org) con devkitA64, libnx y portlibs (SDL
 make
 ```
 
-Genera `EzFiles.nro` (+ `.nacp`).
+Genera `FileZzz.nro` (+ `.nacp`).
 
 ## Desplegar
 
@@ -25,7 +25,7 @@ Genera `EzFiles.nro` (+ `.nacp`).
 .\deploy_switch.ps1
 ```
 
-o copia `EzFiles.nro` a `sdmc:/switch/EzFiles/EzFiles.nro` (vía DBI MTP, FTP o USB).
+o copia `FileZzz.nro` a `sdmc:/switch/FileZzz/FileZzz.nro` o `sdmc:/switch/FileZzz.nro` (vía DBI MTP, FTP o USB).
 
 ## Controles
 

@@ -1,0 +1,151 @@
+<brls:Box
+    width="auto"
+    height="auto"
+    axis="column"
+    paddingTop="25px"
+    paddingLeft="40px"
+    paddingRight="40px"
+    paddingBottom="20px">
+
+    <!-- Encabezado estilo Switch Horizon OS con barra elegante -->
+    <brls:Box
+        width="100%"
+        height="auto"
+        axis="column"
+        marginBottom="18px">
+        <brls:Box
+            width="auto"
+            height="auto"
+            axis="row"
+            alignItems="center"
+            marginBottom="12px">
+            <brls:Rectangle
+                width="4px"
+                height="22px"
+                color="#00F2FE"
+                marginRight="12px" />
+            <brls:Label
+                text="@i18n/hints/games_installed"
+                fontSize="24px"
+                textColor="@theme/brls/text" />
+        </brls:Box>
+        <brls:Box
+            width="100%"
+            height="1px"
+            backgroundColor="@theme/brls/sidebar/separator" />
+    </brls:Box>
+
+    <brls:Box
+        width="auto"
+        height="auto"
+        axis="row">
+
+        <!-- Lista scrollable de juegos (Screenshot 10) -->
+        <brls:ScrollingFrame
+            width="780px"
+            height="560px"
+            marginRight="30px">
+            <brls:Box
+                id="boxGamesFullList"
+                width="auto"
+                height="auto"
+                axis="column"
+                paddingBottom="40px" />
+        </brls:ScrollingFrame>
+
+        <!-- Divisor vertical sutil estilo Horizon OS -->
+        <brls:Box
+            width="1px"
+            height="460px"
+            backgroundColor="@theme/brls/sidebar/separator"
+            marginRight="35px" />
+
+        <!-- Barra lateral fija derecha: Almacenamiento limpio nativo (Screenshot 190900) -->
+        <brls:Box
+            width="340px"
+            height="auto"
+            axis="column"
+            paddingTop="10px">
+
+            <!-- Memoria de la consola -->
+            <brls:Label
+                text="@i18n/hints/nand_storage"
+                fontSize="16px"
+                textColor="@theme/brls/text"
+                marginBottom="12px" />
+
+            <brls:Box
+                id="barNandFullBg"
+                width="320px"
+                height="10px"
+                cornerRadius="2px"
+                backgroundColor="#2A2E39"
+                marginBottom="8px">
+                <brls:Box
+                    id="barNandFullFill"
+                    width="120px"
+                    height="10px"
+                    cornerRadius="2px"
+                    backgroundColor="#FFFFFF" />
+            </brls:Box>
+
+            <brls:Box
+                width="320px"
+                height="auto"
+                axis="row"
+                justifyContent="spaceBetween"
+                marginBottom="35px">
+                <brls:Label
+                    text="@i18n/hints/free_space"
+                    fontSize="14px"
+                    textColor="@theme/brls/text_disabled" />
+                <brls:Label
+                    id="lblNandFullFree"
+                    text="-- GB"
+                    fontSize="18px"
+                    textColor="@theme/brls/text" />
+            </brls:Box>
+
+            <!-- Tarjeta microSD -->
+            <brls:Label
+                text="@i18n/hints/sd_storage"
+                fontSize="16px"
+                textColor="@theme/brls/text"
+                marginBottom="12px" />
+
+            <brls:Box
+                id="barSdFullBg"
+                width="320px"
+                height="10px"
+                cornerRadius="2px"
+                backgroundColor="#2A2E39"
+                marginBottom="8px">
+                <brls:Box
+                    id="barSdFullFill"
+                    width="200px"
+                    height="10px"
+                    cornerRadius="2px"
+                    backgroundColor="#00E6A8" />
+            </brls:Box>
+
+            <brls:Box
+                width="320px"
+                height="auto"
+                axis="row"
+                justifyContent="spaceBetween">
+                <brls:Label
+                    text="@i18n/hints/free_space"
+                    fontSize="14px"
+                    textColor="@theme/brls/text_disabled" />
+                <brls:Label
+                    id="lblSdFullFree"
+                    text="-- GB"
+                    fontSize="18px"
+                    textColor="@theme/brls/text" />
+            </brls:Box>
+
+        </brls:Box>
+
+    </brls:Box>
+
+</brls:Box>

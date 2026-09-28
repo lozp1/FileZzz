@@ -3,81 +3,262 @@
     height="auto"
     axis="column"
     paddingTop="20px"
-    paddingLeft="40px"
-    paddingRight="40px"
-    paddingBottom="20px">
+    paddingLeft="35px"
+    paddingRight="35px"
+    paddingBottom="15px">
 
-    <brls:Header
-        title="Servidor FTP Inalambrico" />
-    <brls:Label
-        text="Transfiere archivos mediante Wi-Fi desde cualquier cliente FTP (FileZilla, WinSCP)"
-        fontSize="15px"
-        textColor="@theme/brls/header/subtitle"
-        marginTop="4px" />
-
+    <!-- Encabezado estilo Switch Horizon OS con línea divisoria -->
     <brls:Box
-        width="auto"
+        width="100%"
         height="auto"
         axis="column"
-        marginTop="20px"
-        padding="20px"
-        cornerRadius="8px"
-        backgroundColor="@theme/brls/sidebar/background">
-
-        <brls:Box
-            width="auto"
-            height="auto"
-            axis="row"
-            justifyContent="spaceBetween"
-            alignItems="center">
-
-            <brls:Label
-                id="lblFtpStatus"
-                text="Estado: Desactivado"
-                fontSize="22px"
-                textColor="#8B5CF6" />
-
-            <brls:Button
-                id="btnToggleFtp"
-                text="Iniciar FTP"
-                width="180px"
-                height="44px" />
-        </brls:Box>
-
+        marginBottom="16px">
         <brls:Label
-            id="lblFtpAddress"
-            text="Direccion: Desconectado"
-            fontSize="16px"
-            textColor="@theme/brls/text_disabled"
-            marginTop="12px" />
-
+            text="@i18n/hints/ftp_title"
+            fontSize="24px"
+            textColor="@theme/brls/text"
+            marginBottom="12px" />
+        <brls:Box
+            width="100%"
+            height="1px"
+            backgroundColor="@theme/brls/sidebar/separator" />
     </brls:Box>
 
-    <brls:Header
-        title="Instrucciones de Conexion"
-        marginTop="25px" />
-
     <brls:Box
-        width="auto"
+        width="100%"
         height="auto"
-        axis="column"
-        padding="15px"
-        cornerRadius="8px"
-        backgroundColor="@theme/brls/background">
-        <brls:Label
-            text="1. Asegurate de que la Switch y tu PC esten en la misma red Wi-Fi."
-            fontSize="15px"
-            textColor="@theme/brls/text" />
-        <brls:Label
-            text="2. Abre tu cliente FTP e introduce la IP y el puerto mostrados arriba."
-            fontSize="15px"
-            textColor="@theme/brls/text"
-            marginTop="8px" />
-        <brls:Label
-            text="3. Usuario y contrasena: Dejar en blanco o usar modo anonimo."
-            fontSize="15px"
-            textColor="@theme/brls/text"
-            marginTop="8px" />
+        axis="row">
+
+        <!-- Columna Izquierda: Filas Clave-Valor estilo Horizon OS (Aprovechando el largo de pantalla) -->
+        <brls:Box
+            id="boxFtpRows"
+            width="620px"
+            height="auto"
+            axis="column"
+            marginRight="30px">
+
+            <!-- Fila 1: Estado del servidor -->
+            <brls:Box
+                id="rowFtpStatus"
+                width="100%"
+                height="58px"
+                axis="row"
+                alignItems="center"
+                justifyContent="spaceBetween"
+                paddingLeft="14px"
+                paddingRight="14px">
+                <brls:Label
+                    text="@i18n/hints/ftp_status"
+                    fontSize="16px"
+                    textColor="@theme/brls/text" />
+                <brls:Label
+                    id="lblFtpStatusVal"
+                    text="@i18n/hints/ftp_disconnected"
+                    fontSize="16px"
+                    textColor="#00E6A8" />
+            </brls:Box>
+            <brls:Box width="100%" height="1px" backgroundColor="@theme/brls/sidebar/separator" />
+
+            <!-- Fila 2: Dirección IP -->
+            <brls:Box
+                id="rowFtpIp"
+                width="100%"
+                height="58px"
+                axis="row"
+                alignItems="center"
+                justifyContent="spaceBetween"
+                paddingLeft="14px"
+                paddingRight="14px">
+                <brls:Label
+                    text="@i18n/hints/ftp_ip"
+                    fontSize="16px"
+                    textColor="@theme/brls/text" />
+                <brls:Label
+                    id="lblFtpIpVal"
+                    text="0.0.0.0"
+                    fontSize="16px"
+                    textColor="#00E6A8" />
+            </brls:Box>
+            <brls:Box width="100%" height="1px" backgroundColor="@theme/brls/sidebar/separator" />
+
+            <!-- Fila 3: Puerto -->
+            <brls:Box
+                id="rowFtpPort"
+                width="100%"
+                height="58px"
+                focusable="true"
+                axis="row"
+                alignItems="center"
+                justifyContent="spaceBetween"
+                paddingLeft="14px"
+                paddingRight="14px"
+                cornerRadius="4px">
+                <brls:Label
+                    text="@i18n/hints/ftp_port"
+                    fontSize="16px"
+                    textColor="@theme/brls/text" />
+                <brls:Label
+                    id="lblFtpPortVal"
+                    text="5000"
+                    fontSize="16px"
+                    textColor="#00E6A8" />
+            </brls:Box>
+            <brls:Box width="100%" height="1px" backgroundColor="@theme/brls/sidebar/separator" />
+
+            <!-- Fila 4: Nombre de Usuario -->
+            <brls:Box
+                id="rowFtpUser"
+                width="100%"
+                height="58px"
+                focusable="true"
+                axis="row"
+                alignItems="center"
+                justifyContent="spaceBetween"
+                paddingLeft="14px"
+                paddingRight="14px"
+                cornerRadius="4px">
+                <brls:Label
+                    text="@i18n/hints/ftp_user"
+                    fontSize="16px"
+                    textColor="@theme/brls/text" />
+                <brls:Label
+                    id="lblFtpUserVal"
+                    text="switch"
+                    fontSize="16px"
+                    textColor="#00E6A8" />
+            </brls:Box>
+            <brls:Box width="100%" height="1px" backgroundColor="@theme/brls/sidebar/separator" />
+
+            <!-- Fila 5: Contraseña -->
+            <brls:Box
+                id="rowFtpPass"
+                width="100%"
+                height="58px"
+                focusable="true"
+                axis="row"
+                alignItems="center"
+                justifyContent="spaceBetween"
+                paddingLeft="14px"
+                paddingRight="14px"
+                cornerRadius="4px">
+                <brls:Label
+                    text="@i18n/hints/ftp_pass"
+                    fontSize="16px"
+                    textColor="@theme/brls/text" />
+                <brls:Label
+                    id="lblFtpPassVal"
+                    text="•••••"
+                    fontSize="16px"
+                    textColor="#00E6A8" />
+            </brls:Box>
+            <brls:Box width="100%" height="1px" backgroundColor="@theme/brls/sidebar/separator" />
+
+            <!-- Fila 6: Modo Anónimo -->
+            <brls:Box
+                id="rowFtpAnon"
+                width="100%"
+                height="58px"
+                focusable="true"
+                axis="row"
+                alignItems="center"
+                justifyContent="spaceBetween"
+                paddingLeft="14px"
+                paddingRight="14px"
+                cornerRadius="4px">
+                <brls:Label
+                    text="@i18n/hints/ftp_anon"
+                    fontSize="16px"
+                    textColor="@theme/brls/text" />
+                <brls:Label
+                    id="lblFtpAnonVal"
+                    text="@i18n/hints/on"
+                    fontSize="16px"
+                    textColor="#00E6A8" />
+            </brls:Box>
+            <brls:Box width="100%" height="1px" backgroundColor="@theme/brls/sidebar/separator" />
+
+            <!-- Fila 7: Punto de montaje -->
+            <brls:Box
+                width="100%"
+                height="58px"
+                axis="row"
+                alignItems="center"
+                justifyContent="spaceBetween"
+                paddingLeft="14px"
+                paddingRight="14px">
+                <brls:Label
+                    text="@i18n/hints/ftp_mount"
+                    fontSize="16px"
+                    textColor="@theme/brls/text" />
+                <brls:Label
+                    text="sdmc:/"
+                    fontSize="16px"
+                    textColor="#00E6A8" />
+            </brls:Box>
+
+        </brls:Box>
+
+        <!-- Divisor vertical sutil estilo Horizon OS -->
+        <brls:Box
+            width="1px"
+            height="490px"
+            backgroundColor="@theme/brls/sidebar/separator"
+            marginRight="30px" />
+
+        <!-- Columna Derecha: Conexión Móvil + Código QR + Botón Acción -->
+        <brls:Box
+            width="440px"
+            height="auto"
+            axis="column"
+            alignItems="center"
+            padding="24px"
+            cornerRadius="8px"
+            backgroundColor="@theme/brls/sidebar/background">
+
+            <brls:Label
+                text="@i18n/hints/ftp_scan_mobile"
+                fontSize="20px"
+                textColor="@theme/brls/text"
+                marginBottom="6px" />
+
+            <brls:Label
+                id="lblFtpQrSub"
+                text="Conexión Directa Móvil"
+                fontSize="15px"
+                textColor="#00E6A8"
+                marginBottom="14px" />
+
+            <!-- Contenedor para Código QR móvil -->
+            <brls:Box
+                id="boxFtpQrContainer"
+                width="230px"
+                height="230px"
+                cornerRadius="8px"
+                justifyContent="center"
+                alignItems="center"
+                backgroundColor="#2A2E39"
+                marginBottom="14px" />
+
+            <!-- Botón Iniciar / Detener Servidor FTP -->
+            <brls:Box
+                id="btnFtpAction"
+                width="260px"
+                height="48px"
+                focusable="true"
+                cornerRadius="6px"
+                backgroundColor="#0284C7"
+                justifyContent="center"
+                alignItems="center"
+                marginTop="4px">
+                <brls:Label
+                    id="lblFtpBtnText"
+                    text="@i18n/hints/ftp_btn_start"
+                    fontSize="17px"
+                    textColor="#FFFFFF" />
+            </brls:Box>
+
+        </brls:Box>
+
     </brls:Box>
 
 </brls:Box>

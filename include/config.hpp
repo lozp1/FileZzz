@@ -18,19 +18,31 @@ struct AppConfig {
     // FTP settings
     int ftpPort = 5000;
     bool ftpAnonLogin = true;
+    std::string ftpUsername = "switch";
+    std::string ftpPassword = "switch";
 
     // UI
     std::string language = "es";
     std::string theme = "Dark";
+    std::string wallpaperPath = "";
+    float wallpaperOpacity = 1.0f;
 
     static AppConfig& get() {
         static AppConfig s_instance;
         return s_instance;
     }
 
-    void load(const std::string& path = "sdmc:/switch/EzFiles/config.ini") {
+    void load(const std::string& path = "sdmc:/switch/FileZzz/config.ini") {
         std::ifstream file(path);
         if (!file.is_open()) {
+            // Migrar configuración de EzFiles si existe
+            std::ifstream oldFile("sdmc:/switch/EzFiles/config.ini");
+            if (oldFile.is_open()) {
+                oldFile.close();
+                load("sdmc:/switch/EzFiles/config.ini");
+                save(); // Guardar en la nueva ubicación FileZzz
+                return;
+            }
             save(path); // Guardar configuración predeterminada si no existe
             return;
         }
@@ -76,21 +88,26 @@ struct AppConfig {
             } else if (currentSection == "FTP") {
                 if (key == "Port") ftpPort = std::stoi(val);
                 else if (key == "AnonLogin") ftpAnonLogin = toBool(val);
+                else if (key == "Username") ftpUsername = val;
+                else if (key == "Password") ftpPassword = val;
             } else if (currentSection == "UI") {
                 if (key == "Language") language = val;
                 else if (key == "Theme") theme = val;
+                else if (key == "Wallpaper") wallpaperPath = val;
+                else if (key == "WallpaperOpacity") wallpaperOpacity = std::stof(val);
             }
         }
     }
 
-    void save(const std::string& path = "sdmc:/switch/EzFiles/config.ini") {
+    void save(const std::string& path = "sdmc:/switch/FileZzz/config.ini") {
         mkdir("sdmc:/switch", 0777);
-        mkdir("sdmc:/switch/EzFiles", 0777);
+        mkdir("sdmc:/switch/FileZzz", 0777);
+        mkdir("sdmc:/switch/FileZzz/wallpapers", 0777);
 
         std::ofstream file(path);
         if (!file.is_open()) return;
 
-        file << "; EzFiles Configuration File\n\n";
+        file << "; FileZzz Configuration File\n\n";
 
         file << "[MTP]\n";
         file << "ShowSD = " << (mtpShowSD ? "true" : "false") << "\n";
@@ -104,10 +121,14 @@ struct AppConfig {
 
         file << "[FTP]\n";
         file << "Port = " << ftpPort << "\n";
-        file << "AnonLogin = " << (ftpAnonLogin ? "true" : "false") << "\n\n";
+        file << "AnonLogin = " << (ftpAnonLogin ? "true" : "false") << "\n";
+        file << "Username = " << ftpUsername << "\n";
+        file << "Password = " << ftpPassword << "\n\n";
 
         file << "[UI]\n";
         file << "Language = " << language << "\n";
         file << "Theme = " << theme << "\n";
+        file << "Wallpaper = " << wallpaperPath << "\n";
+        file << "WallpaperOpacity = " << wallpaperOpacity << "\n";
     }
 };

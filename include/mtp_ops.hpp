@@ -55,8 +55,9 @@ enum {
     MR_NotSupported         = 0x2005,
     MR_ParameterNotSupported= 0x2006,
     MR_IncompleteTransfer   = 0x2007,
-    MR_InvalidStorage       = 0x2009,
     MR_InvalidObjectHandle  = 0x200B,
+    MR_ObjectWriteProtected = 0x200D,
+    MR_AccessDenied         = 0x200F,
     MR_DeviceBusy           = 0x2019,
     MR_PropNotSupported     = 0xA80A,
 };
@@ -229,6 +230,7 @@ inline std::string mtpJoin(const std::string& a, const std::string& b) {
 inline bool mtpDelRec(const std::string& path) {
     struct stat st;
     if (stat(path.c_str(), &st) != 0) return false;
+    chmod(path.c_str(), 0777);
     if (S_ISDIR(st.st_mode)) {
         DIR* d = opendir(path.c_str());
         if (!d) return false;
@@ -238,6 +240,7 @@ inline bool mtpDelRec(const std::string& path) {
             mtpDelRec(mtpJoin(path, e->d_name));
         }
         closedir(d);
+        chmod(path.c_str(), 0777);
         return rmdir(path.c_str()) == 0;
     }
     return unlink(path.c_str()) == 0;
@@ -387,9 +390,9 @@ inline void mtpScanAllAlbums(u32 storage, std::vector<u32>& handles) {
 // Prepara las particiones virtuales de instalacion al estilo DBI (SD y NAND)
 inline void mtpScanInstaller(u32 storage, std::vector<u32>& handles) {
     bool isNand = (storage == STORAGE_INSTALL_NAND);
-    std::string folder = isNand ? "sdmc:/switch/EzFiles/install_nand" : "sdmc:/switch/EzFiles/install_sd";
+    std::string folder = isNand ? "sdmc:/switch/FileZzz/install_nand" : "sdmc:/switch/FileZzz/install_sd";
     mkdir("sdmc:/switch", 0777);
-    mkdir("sdmc:/switch/EzFiles", 0777);
+    mkdir("sdmc:/switch/FileZzz", 0777);
     mkdir(folder.c_str(), 0777);
 
     DIR* d = opendir(folder.c_str());
@@ -414,8 +417,8 @@ inline void mtpScanInstaller(u32 storage, std::vector<u32>& handles) {
 
 inline void mtpScanSaves(u32 storage, std::vector<u32>& handles) {
     mkdir("sdmc:/switch", 0777);
-    mkdir("sdmc:/switch/EzFiles", 0777);
-    mkdir("sdmc:/switch/EzFiles/saves", 0777);
+    mkdir("sdmc:/switch/FileZzz", 0777);
+    mkdir("sdmc:/switch/FileZzz/saves", 0777);
 
     // Carpetas raiz de almacenamiento 7: Saves al estilo DBI
     std::string pInst = "virtual:/saves/installed";
@@ -471,8 +474,8 @@ inline void mtpScanSaves(u32 storage, std::vector<u32>& handles) {
         nsExit();
     }
 
-    // Poblar uninstalled games si existen respaldos en JKSV o EzFiles
-    std::string uninstDir = access("sdmc:/JKSV", F_OK) == 0 ? "sdmc:/JKSV" : "sdmc:/switch/EzFiles/saves";
+    // Poblar uninstalled games si existen respaldos en JKSV o FileZzz
+    std::string uninstDir = access("sdmc:/JKSV", F_OK) == 0 ? "sdmc:/JKSV" : "sdmc:/switch/FileZzz/saves";
     DIR* ud = opendir(uninstDir.c_str());
     if (ud) {
         struct dirent* ue;
@@ -520,6 +523,19 @@ inline void mtpScanInstalledGames(u32 storage, std::vector<u32>& handles) {
                 snprintf(titleName, sizeof(titleName), "Titulo [%016llX]", (unsigned long long)titleId);
             }
 
+            std::string cleanName = titleName;
+            while (!cleanName.empty() && (unsigned char)cleanName.front() <= ' ') cleanName.erase(cleanName.begin());
+            while (!cleanName.empty() && (unsigned char)cleanName.back() <= ' ') cleanName.pop_back();
+            if (cleanName.empty()) {
+                char tb[64];
+                snprintf(tb, sizeof(tb), "Juego [%016llX]", (unsigned long long)titleId);
+                cleanName = tb;
+            }
+            // Sanitizar nombres que inicien con Autorun para que Windows Explorer no lo trate como un dispositivo/disquete de autoarranque
+            if (cleanName.rfind("Autorun", 0) == 0 || cleanName.rfind("autorun", 0) == 0) {
+                cleanName = "App - " + cleanName;
+            }
+
             NsApplicationOccupiedSize occSize = {};
             u64 gameSize = 0;
             if (R_SUCCEEDED(nsCalculateApplicationOccupiedSize(titleId, &occSize))) {
@@ -528,24 +544,20 @@ inline void mtpScanInstalledGames(u32 storage, std::vector<u32>& handles) {
             }
 
             char filename[560];
-            for (char* p = titleName; *p; p++) {
-                if (*p == '/' || *p == '\\' || *p == ':' || *p == '*' || *p == '?' || *p == '"' || *p == '<' || *p == '>' || *p == '|') {
-                    *p = '_';
+            std::string safeFileBase = cleanName;
+            for (char& c : safeFileBase) {
+                if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
+                    c = '_';
                 }
             }
-            snprintf(filename, sizeof(filename), "%s [%016llX].nsp", titleName, (unsigned long long)titleId);
+            snprintf(filename, sizeof(filename), "%s [%016llX].nsp", safeFileBase.c_str(), (unsigned long long)titleId);
 
             // 1. Carpeta con el nombre del juego (DBI style)
-            std::string folderPath = "virtual:/games/" + std::string(titleName);
-            u32 hDir = getOrRegisterHandle(storage, folderPath, 0, titleName, true, 0, time(nullptr));
+            std::string folderPath = "virtual:/games/" + cleanName;
+            u32 hDir = getOrRegisterHandle(storage, folderPath, 0, cleanName, true, 0, time(nullptr));
             handles.push_back(hDir);
 
-            // 2. Archivo .nsp directo en la raiz de la particion (DBI style)
-            std::string virtPath = "virtual:/games/" + std::string(filename);
-            u32 hFile = getOrRegisterHandle(storage, virtPath, 0, filename, false, gameSize, time(nullptr));
-            handles.push_back(hFile);
-
-            // 3. Archivo .nsp visible tambien dentro de la carpeta del juego
+            // 2. Archivo .nsp dentro de la carpeta del juego (DBI style)
             std::string insideNsp = folderPath + "/" + std::string(filename);
             getOrRegisterHandle(storage, insideNsp, hDir, filename, false, gameSize, time(nullptr));
         }
@@ -589,6 +601,7 @@ inline bool sendFileData(u16 code, u32 tx, const std::string& path, u64 size) {
 
     std::string fname = path.substr(path.find_last_of('/') + 1);
     g_telemetry.start(fname, size, false);
+    mtp_usb::logEvent("[MTP] Enviando a PC: " + fname);
 
     u32 hdrSize = size > 0xFFFFFFFFULL ? 0xFFFFFFFFUL : (u32)size;
     u64 totalSize = 12 + (u64)hdrSize;
@@ -933,8 +946,8 @@ inline void worker() {
                 } else if (storage == STORAGE_GAMES) {
                     targetStorage = STORAGE_GAMES;
                 } else if (storage == STORAGE_SAVES) {
-                    mkdir("sdmc:/switch/EzFiles/saves", 0777);
-                    scanPath = "sdmc:/switch/EzFiles/saves";
+                    mkdir("sdmc:/switch/FileZzz/saves", 0777);
+                    scanPath = "sdmc:/switch/FileZzz/saves";
                     targetStorage = STORAGE_SAVES;
                 } else {
                     scanPath = "sdmc:/";
@@ -991,15 +1004,32 @@ inline void worker() {
             break;
         }
         case OP_DeleteObject: {
-            const MtpObj* o = len >= 16 ? mtpFind(P(0)) : nullptr;
-            std::string delName = o ? o->name : "";
-            bool ok = o && mtpDelRec(o->path);
-            if (ok && !delName.empty()) {
+            u32 handle = len >= 16 ? P(0) : 0;
+            const MtpObj* o = mtpFind(handle);
+            if (!o) {
+                sendResponse(tx, MR_InvalidObjectHandle, nullptr, 0);
+                break;
+            }
+            std::string delPath = o->path;
+            std::string delName = o->name;
+            bool ok = mtpDelRec(delPath);
+            if (ok) {
+                // Limpiar de g_objs el objeto y cualquier subobjeto si era directorio
+                std::vector<MtpObj> remaining;
+                remaining.reserve(g_objs.size());
+                for (const auto& obj : g_objs) {
+                    if (obj.handle == handle) continue;
+                    if (obj.path == delPath) continue;
+                    if (obj.path.rfind(delPath + "/", 0) == 0) continue;
+                    remaining.push_back(obj);
+                }
+                g_objs = remaining;
+
                 char b[128];
                 snprintf(b, sizeof(b), "Eliminado: %s", delName.c_str());
                 mtp_usb::mlog(b);
             }
-            sendResponse(tx, ok ? MR_OK : MR_GeneralError, nullptr, 0);
+            sendResponse(tx, ok ? MR_OK : MR_AccessDenied, nullptr, 0);
             break;
         }
         case OP_SendObjectInfo: {
@@ -1025,14 +1055,14 @@ inline void worker() {
             if (targetStorage == STORAGE_ALBUM) parentPath = "sdmc:/Nintendo/Album";
             else if (targetStorage == STORAGE_INSTALL_SD) {
                 mkdir("sdmc:/switch", 0777);
-                mkdir("sdmc:/switch/EzFiles", 0777);
-                mkdir("sdmc:/switch/EzFiles/install_sd", 0777);
-                parentPath = "sdmc:/switch/EzFiles/install_sd";
+                mkdir("sdmc:/switch/FileZzz", 0777);
+                mkdir("sdmc:/switch/FileZzz/install_sd", 0777);
+                parentPath = "sdmc:/switch/FileZzz/install_sd";
             } else if (targetStorage == STORAGE_INSTALL_NAND) {
                 mkdir("sdmc:/switch", 0777);
-                mkdir("sdmc:/switch/EzFiles", 0777);
-                mkdir("sdmc:/switch/EzFiles/install_nand", 0777);
-                parentPath = "sdmc:/switch/EzFiles/install_nand";
+                mkdir("sdmc:/switch/FileZzz", 0777);
+                mkdir("sdmc:/switch/FileZzz/install_nand", 0777);
+                parentPath = "sdmc:/switch/FileZzz/install_nand";
             } else if (targetStorage == STORAGE_NAND_USER) {
                 mountNandUser();
                 parentPath = "user:/";
@@ -1040,8 +1070,8 @@ inline void worker() {
                 mountNandSys();
                 parentPath = "system:/";
             } else if (targetStorage == STORAGE_SAVES) {
-                mkdir("sdmc:/switch/EzFiles/saves", 0777);
-                parentPath = "sdmc:/switch/EzFiles/saves";
+                mkdir("sdmc:/switch/FileZzz/saves", 0777);
+                parentPath = "sdmc:/switch/FileZzz/saves";
             }
 
             if (parentH != 0 && parentH != 0xFFFFFFFF) {
@@ -1098,12 +1128,19 @@ inline void worker() {
 
             u32 dataLen = rd32(s_recvDataBuf);
             u64 totalExpected = (dataLen == 0xFFFFFFFF) ? 0xFFFFFFFFFFFFFFFFULL : (u64)(dataLen - 12);
+            if (totalExpected == 0xFFFFFFFFFFFFFFFFULL && g_pendingSendSize > 0) {
+                totalExpected = g_pendingSendSize;
+            }
             u64 totalReceived = 0;
 
             std::string dispName = g_pendingSendPath.substr(g_pendingSendPath.find_last_of('/') + 1);
             g_telemetry.start(dispName, totalExpected, true);
+            mtp_usb::logEvent("[MTP] Recibiendo de PC: " + dispName);
             auto tLast = std::chrono::steady_clock::now();
             u64 bytesLast = 0;
+
+            alignas(0x1000) static char s_fileWriteBuf[256 * 1024];
+            setvbuf(f, s_fileWriteBuf, _IOFBF, sizeof(s_fileWriteBuf));
 
             if (firstGot > 12) {
                 size_t payloadInFirst = firstGot - 12;
@@ -1118,8 +1155,8 @@ inline void worker() {
                     if (rem < toRead) toRead = (size_t)rem;
                 }
 
-                size_t got = usbMtpTransfer(MTP_EP_BULK_OUT, 0, s_recvDataBuf, toRead, 5000000000ULL);
-                if (got == 0) break;
+                size_t got = usbMtpTransfer(MTP_EP_BULK_OUT, 0, s_recvDataBuf, toRead, 10000000000ULL);
+                if (got == 0) break; // Timeout o fin de enlace
 
                 fwrite(s_recvDataBuf, 1, got, f);
                 totalReceived += got;
@@ -1134,11 +1171,23 @@ inline void worker() {
                     bytesLast = totalReceived;
                 }
 
-                if (got < toRead) break;
+                // Para transferencias de tamaño no especificado, un paquete corto marca el fin
+                if (totalExpected == 0xFFFFFFFFFFFFFFFFULL && (got % 512 != 0)) {
+                    break;
+                }
             }
 
+            fflush(f);
             fclose(f);
             g_telemetry.stop();
+
+            // Consumir ZLT si el tamaño total de la transferencia fue múltiplo exacto de 512
+            if ((12 + totalReceived) % 512 == 0) {
+                u8 zltBuf[512];
+                usbMtpTransfer(MTP_EP_BULK_OUT, 0, zltBuf, sizeof(zltBuf), 100000000ULL);
+            }
+
+            mtp_usb::logEvent("[MTP] Guardado OK: " + dispName);
 
             struct stat st;
             if (stat(g_pendingSendPath.c_str(), &st) == 0) {

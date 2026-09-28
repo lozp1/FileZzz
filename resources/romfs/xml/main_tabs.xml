@@ -1,30 +1,33 @@
-<brls:AppletFrame
+<WallpaperAppletFrame
     id="mainAppletFrame"
     iconInterpolation="linear"
     footerHidden="false">
     <brls:TabFrame
-        title="EzFiles"
-        icon="@res/img/app_logo_clean.png">
+        id="mainTabFrame">
 
-        <brls:Tab label="Explorador">
-            <ExplorerTab />
+        <brls:Tab label="@i18n/hints/tab_explorer" icon="romfs:/img/icon_explorer.png">
+            <HeroTab id="heroTabExplorer" />
         </brls:Tab>
 
-        <brls:Tab label="USB MTP">
-            <MtpTab />
+        <brls:Tab label="@i18n/hints/tab_games" icon="romfs:/img/icon_nsp_sm.png">
+            <HeroTab id="heroTabGames" />
         </brls:Tab>
 
-        <brls:Tab label="Servidor FTP">
-            <FtpTab />
+        <brls:Tab label="@i18n/hints/tab_mtp" icon="romfs:/img/icon_usb.png">
+            <HeroTab id="heroTabMtp" />
         </brls:Tab>
 
-        <brls:Tab label="Ajustes">
-            <SettingsTab />
+        <brls:Tab label="@i18n/hints/tab_ftp" icon="romfs:/img/icon_ftp.png">
+            <HeroTab id="heroTabFtp" />
         </brls:Tab>
 
-        <brls:Tab label="Acerca de">
-            <AboutTab />
+        <brls:Tab label="@i18n/hints/tab_settings" icon="romfs:/img/icon_theme.png">
+            <HeroTab id="heroTabSettings" />
+        </brls:Tab>
+
+        <brls:Tab label="@i18n/hints/tab_about" icon="romfs:/img/icon_about.png">
+            <HeroTab id="heroTabAbout" />
         </brls:Tab>
 
     </brls:TabFrame>
-</brls:AppletFrame>
+</WallpaperAppletFrame>

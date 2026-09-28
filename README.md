@@ -39,15 +39,18 @@
 
 ## 🌟 Características Principales
 
-- 📂 **Explorador de Archivos y Particiones Virtuales:** Acceso directo a la microSD física (`sdmc:/`) y montaje dinámico de las 8 particiones virtuales de la consola:
-  - `1: SD Card` (Almacenamiento microSD completo con lectura y escritura).
-  - `2: 1: Nand (USER)` (Partición interna de usuario: partidas guardadas y capturas).
+- 📂 **Explorador de Archivos y Particiones del Sistema:** Acceso directo a la microSD física (`sdmc:/`) y montaje dinámico de las particiones virtuales de la consola:
+  - `1: SD Card` (Almacenamiento microSD completo con lectura y escritura a alta velocidad).
+  - `2: 1: Nand (USER)` (Partición interna de usuario en modo exploración).
   - `3: 2: Nand (SYSTEM)` (Archivos esenciales de Horizon OS en modo solo lectura).
-  - `4: 3: Installed Games` (Títulos instalados en microSD y memoria del sistema).
-  - `5: 4: MicroSD Install` (Instalación directa de archivos `.NSP` / `.NSZ` hacia la SD).
-  - `6: 5: NAND Install` (Instalación directa hacia el almacenamiento interno NAND).
-  - `7: 6: Saves` (Respaldos y exportación de partidas guardadas).
-  - `8: 7: Album` (Capturas de pantalla y grabaciones de video).
+  - `4: 3: Installed Games` (Visor de títulos instalados en microSD y memoria del sistema).
+  - `5: 4: MicroSD Install` *(En desarrollo / Staging)* (Recepción de paquetes para el motor de instalación NCM/ES).
+  - `6: 5: NAND Install` *(En desarrollo / Staging)* (Recepción de paquetes hacia la memoria interna).
+  - `7: 6: Saves` *(En desarrollo)* (Estructura base para la futura gestión y respaldo de partidas).
+  - `8: 7: Album` (Acceso directo a capturas de pantalla y grabaciones de video).
+
+> ℹ️ **Nota de transparencia sobre la versión Alpha actual (v1.3.0):**
+> Las funciones de exploración de archivos, servidor FTP, transferencia MTP de la MicroSD física/Álbum, personalización de temas y visor de programas instalados están **100% operativas**. La instalación directa al menú de inicio de la consola (`.nsp`/`.nsz`) y la extracción de partidas guardadas se encuentran en desarrollo activo para la versión v1.4.0.
 - 🎮 **Gestor de Programas y Juegos Instalados (60 FPS):** Carga instantánea y desacoplada de títulos instalados, iconos en alta definición, versiones, autores, cálculo de tamaño exacto y barras de capacidad en tiempo real para memoria interna y microSD.
 - ⚡ **Servidor USB MTP de Alta Velocidad:** Conecta tu Nintendo Switch al PC (Windows, macOS o Linux) sin necesidad de controladores adicionales. Transfiere archivos a máxima velocidad con bitácora de actividad en vivo.
 - 📶 **Servidor FTP Inalámbrico:** Conexión local Wi-Fi segura o anónima para gestionar todo el contenido de la tarjeta SD desde FileZilla, WinSCP o navegadores web.

@@ -18,3 +18,23 @@ temp_*/
 Thumbs.db
 .DS_Store
 *.user
+
+# Debug, scratch y logs temporales
+*.log
+dumps/
+recovered_*.txt
+step_*.json
+temp.txt
+check_crash.ps1
+check_herotab.py
+dump_steps.py
+extract_trans.py
+inject*.py
+inspect_*.ps1
+inspect_*.py
+restore.py
+start_mtp_watcher.vbs
+watch_switch_mtp.ps1
+
+# Dependencias externas
+extern/

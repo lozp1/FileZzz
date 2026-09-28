@@ -13,36 +13,53 @@ if (-not $sd) {
     exit 1
 }
 
-$switchFolder = $sd.GetFolder.Items() | Where-Object { $_.Name -eq "switch" } | Select-Object -First 1
-if (-not $switchFolder) {
+$sw = $sd.GetFolder.Items() | Where-Object { $_.Name -ieq "switch" } | Select-Object -First 1
+if (-not $sw) {
     Write-Host "ERROR: No se encontro la carpeta /switch en la SD."
     exit 1
 }
 
-# Limpiar carpeta temp_EzFiles si existe en la Switch
-$tempInSwitch = $switchFolder.GetFolder.Items() | Where-Object { $_.Name -eq "temp_EzFiles" } | Select-Object -First 1
-if ($tempInSwitch) {
-    Write-Host "Eliminando temp_EzFiles residual de la Switch..."
-    $tempInSwitch.InvokeVerb("delete")
-}
-
-$nroSrc = "C:\Projects\c++\EzFiles\EzFiles.nro"
+$swFolder = $sw.GetFolder
+$nroSrc = "C:\Projects\c++\EzFiles\FileZzz.nro"
 if (-not (Test-Path $nroSrc)) {
-    Write-Host "ERROR: EzFiles.nro no encontrado en el PC."
+    Write-Host "ERROR: FileZzz.nro no encontrado en el PC."
     exit 1
 }
 
-Write-Host "Copiando EzFiles.nro a sdmc:/switch/EzFiles.nro..."
-# Copiar directamente a sdmc:/switch/EzFiles.nro (Sobreescribir con flag 16: Yes to all)
-$switchFolder.GetFolder.CopyHere($nroSrc, 16)
-Start-Sleep -Seconds 2
+$srcSize = (Get-Item $nroSrc).Length
+Write-Host "Tamano de FileZzz.nro local: $srcSize bytes"
 
-# Tambien actualizar sdmc:/switch/EzFiles/EzFiles.nro si la subcarpeta existe
-$targetAppFolder = $switchFolder.GetFolder.Items() | Where-Object { $_.Name -eq "EzFiles" } | Select-Object -First 1
-if ($targetAppFolder) {
-    Write-Host "Copiando EzFiles.nro a sdmc:/switch/EzFiles/EzFiles.nro..."
-    $targetAppFolder.GetFolder.CopyHere($nroSrc, 16)
-    Start-Sleep -Seconds 2
+# Asegurar carpeta de la aplicacion sdmc:/switch/FileZzz/
+$targetAppFolder = $swFolder.Items() | Where-Object { $_.Name -ieq "FileZzz" } | Select-Object -First 1
+if (-not $targetAppFolder) {
+    Write-Host "Creando carpeta sdmc:/switch/FileZzz..."
+    $swFolder.NewFolder("FileZzz")
+    Start-Sleep -Seconds 1
+    $targetAppFolder = $swFolder.Items() | Where-Object { $_.Name -ieq "FileZzz" } | Select-Object -First 1
 }
 
-Write-Host "✅ [DEPLOY EXITOSO] EzFiles.nro actualizado al 100% en tu Switch."
+if (-not $targetAppFolder) {
+    Write-Host "ERROR: No se pudo acceder a sdmc:/switch/FileZzz."
+    exit 1
+}
+
+Write-Host "Iniciando transferencia exclusiva a sdmc:/switch/FileZzz/FileZzz.nro..."
+$appFolder = $targetAppFolder.GetFolder
+$appFolder.CopyHere($nroSrc, 16)
+
+# Esperar a que la transferencia concluya
+$success = $false
+for ($i = 0; $i -lt 30; $i++) {
+    Start-Sleep -Seconds 1
+    $destAppItem = $appFolder.Items() | Where-Object { $_.Name -eq "FileZzz.nro" } | Select-Object -First 1
+    if ($destAppItem) {
+        $sizeStr = $appFolder.GetDetailsOf($destAppItem, 2)
+        if ($sizeStr) {
+            Write-Host "FileZzz.nro en Switch: $sizeStr"
+            $success = $true
+            break
+        }
+    }
+}
+
+Write-Host "✅ [DEPLOY EXITOSO] Unico FileZzz.nro desplegado en sdmc:/switch/FileZzz/."

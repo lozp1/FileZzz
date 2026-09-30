@@ -1533,7 +1533,7 @@ private:
 class GameRowCell : public brls::Box {
 public:
     GameRowCell(const std::string& name, const std::string& version, const std::string& author,
-                u64 titleId, u64 sizeBytes, const std::vector<u8>& iconBytes, bool isSd) {
+                u64 titleId, u64 sizeBytes, u64 nandBytes, u64 sdBytes, const std::vector<u8>& iconBytes, bool isSd) {
         this->setFocusable(true);
         this->setHeight(78);
         this->setWidthPercentage(100.0f);
@@ -1574,24 +1574,37 @@ public:
         lblSub->setMarginTop(2);
         col->addView(lblSub);
 
-        // Fila de iconos de almacenamiento [Consola] ---  [microSD] 15.7 GB
+        // Fila de almacenamiento [Consola] ---  [microSD] 15.7 GB
         brls::Box* storRow = new brls::Box(brls::Axis::ROW);
         storRow->setAlignItems(brls::AlignItems::CENTER);
         storRow->setMarginTop(3);
 
-        char szStr[32];
-        if (sizeBytes < 1024*1024*1024) snprintf(szStr, sizeof(szStr), "%.1f MB", sizeBytes / (1024.0*1024.0));
-        else snprintf(szStr, sizeof(szStr), "%.1f GB", sizeBytes / (1024.0*1024.0*1024.0));
+        auto formatSizeStr = [](u64 bytes, char* out, size_t outSz) {
+            if (bytes == 0) {
+                snprintf(out, outSz, "---");
+            } else if (bytes < 1024 * 1024) {
+                snprintf(out, outSz, "%.1f KB", bytes / 1024.0);
+            } else if (bytes < 1024ULL * 1024 * 1024) {
+                snprintf(out, outSz, "%.1f MB", bytes / (1024.0 * 1024.0));
+            } else {
+                snprintf(out, outSz, "%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0));
+            }
+        };
+
+        char szNand[32];
+        formatSizeStr(nandBytes, szNand, sizeof(szNand));
+        char szSd[32];
+        formatSizeStr(sdBytes, szSd, sizeof(szSd));
 
         brls::Label* lblNand = new brls::Label();
-        lblNand->setText(isSd ? "[Consola] ---" : ("[Consola] " + std::string(szStr)));
+        lblNand->setText("[Consola] " + std::string(szNand));
         lblNand->setFontSize(11);
         lblNand->setTextColor(brls::Application::getTheme()["brls/text_disabled"]);
         lblNand->setMarginRight(15);
         storRow->addView(lblNand);
 
         brls::Label* lblSd = new brls::Label();
-        lblSd->setText(isSd ? ("[microSD] " + std::string(szStr)) : "[microSD] ---");
+        lblSd->setText("[microSD] " + std::string(szSd));
         lblSd->setFontSize(11);
         lblSd->setTextColor(brls::Application::getTheme()["brls/text_disabled"]);
         storRow->addView(lblSd);
@@ -1599,9 +1612,18 @@ public:
         col->addView(storRow);
         this->addView(col);
 
-        // Lado derecho: Tamaño en cian brillante estilo media_1790379533583.png
+        // Lado derecho: Tamaño total en cian brillante estilo Switch nativo
+        char szTotal[32];
+        if (sizeBytes == 0) {
+            snprintf(szTotal, sizeof(szTotal), "0.0 MB");
+        } else if (sizeBytes < 1024ULL * 1024 * 1024) {
+            snprintf(szTotal, sizeof(szTotal), "%.1f MB", sizeBytes / (1024.0 * 1024.0));
+        } else {
+            snprintf(szTotal, sizeof(szTotal), "%.1f GB", sizeBytes / (1024.0 * 1024.0 * 1024.0));
+        }
+
         brls::Label* lblSize = new brls::Label();
-        lblSize->setText(szStr);
+        lblSize->setText(szTotal);
         lblSize->setFontSize(22);
         lblSize->setTextColor(nvgRGB(0, 230, 168)); // Cian / Verde Horizon
         lblSize->setMarginLeft(10);
@@ -1732,6 +1754,8 @@ public:
         std::string author;
         u64 titleId = 0;
         u64 gameSize = 0;
+        u64 nandSize = 0;
+        u64 sdSize = 0;
         std::vector<u8> iconBytes;
         bool isSd = true;
     };
@@ -1957,7 +1981,7 @@ public:
                             if (actualSize > sizeof(controlData->nacp)) {
                                 size_t iconSz = (size_t)(actualSize - sizeof(controlData->nacp));
                                 if (iconSz > 0x20000) iconSz = 0x20000;
-                                if (i < 20) {
+                                if (iconSz > 0) {
                                     g.iconBytes.assign((u8*)controlData->icon, (u8*)controlData->icon + iconSz);
                                 }
                             }
@@ -1982,14 +2006,36 @@ public:
                     snprintf(occStr, sizeof(occStr), "0x%X", (unsigned int)occRc);
                     brls::Logger::info("GamesTab-Thread: [{}/{}] nsCalculateApplicationOccupiedSize retorno {}", i + 1, entryCount, occStr);
                     if (R_SUCCEEDED(occRc)) {
-                        const u64* p = (const u64*)occSize.unk_x0;
-                        g.gameSize = p[0] + p[1] + p[2] + p[3];
-                        g.isSd = (p[1] >= p[0]);
+                        struct AppOccupiedEntity {
+                            u8 storageId;
+                            u8 pad[7];
+                            u64 appSize;
+                            u64 patchSize;
+                            u64 aocSize;
+                        };
+                        const auto* entities = reinterpret_cast<const AppOccupiedEntity*>(occSize.unk_x0);
+                        u64 nandTotal = 0;
+                        u64 sdTotal = 0;
+                        u64 grandTotal = 0;
+                        for (int e = 0; e < 4; ++e) {
+                            u64 entSum = entities[e].appSize + entities[e].patchSize + entities[e].aocSize;
+                            grandTotal += entSum;
+                            if (entities[e].storageId == NcmStorageId_SdCard) {
+                                sdTotal += entSum;
+                            } else if (entities[e].storageId == NcmStorageId_BuiltInUser || entities[e].storageId == NcmStorageId_BuiltInSystem) {
+                                nandTotal += entSum;
+                            }
+                        }
+                        g.gameSize = grandTotal;
+                        g.nandSize = nandTotal;
+                        g.sdSize = sdTotal;
+                        g.isSd = (sdTotal >= nandTotal);
                     }
 
                     char szBuf[32];
                     snprintf(szBuf, sizeof(szBuf), "%llu", (unsigned long long)g.gameSize);
-                    brls::Logger::info("GamesTab-Thread: [{}/{}] Finalizado '{}' (size: {} bytes)", i + 1, entryCount, g.titleName, szBuf);
+                    brls::Logger::info("GamesTab-Thread: [{}/{}] Finalizado '{}' (total: {} bytes, nand: {} bytes, sd: {} bytes, icon: {} bytes)",
+                        i + 1, entryCount, g.titleName, szBuf, (unsigned long long)g.nandSize, (unsigned long long)g.sdSize, g.iconBytes.size());
                     games.push_back(std::move(g));
                 }
 
@@ -2008,16 +2054,18 @@ public:
                     boxGamesList->clearViews();
 
                     for (const auto& g : loaded) {
-                        GameRowCell* cell = new GameRowCell(g.titleName, g.version, g.author, g.titleId, g.gameSize, g.iconBytes, g.isSd);
+                        GameRowCell* cell = new GameRowCell(g.titleName, g.version, g.author, g.titleId, g.gameSize, g.nandSize, g.sdSize, g.iconBytes, g.isSd);
                         std::string tn = g.titleName;
                         std::string ver = g.version;
                         std::string auth = g.author;
                         u64 tid = g.titleId;
                         u64 sz = g.gameSize;
+                        u64 nsz = g.nandSize;
+                        u64 sdsz = g.sdSize;
                         std::vector<u8> ic = g.iconBytes;
                         bool isSd = g.isSd;
-                        cell->registerClickAction([self, tn, ver, auth, tid, sz, ic, isSd](brls::View*) {
-                            self->showGameDetails(tn, ver, auth, tid, sz, ic, isSd);
+                        cell->registerClickAction([self, tn, ver, auth, tid, sz, nsz, sdsz, ic, isSd](brls::View*) {
+                            self->showGameDetails(tn, ver, auth, tid, sz, nsz, sdsz, ic, isSd);
                             return true;
                         });
                         boxGamesList->addView(cell);
@@ -2052,7 +2100,7 @@ public:
     }
 
     void showGameDetails(const std::string& name, const std::string& version, const std::string& author,
-                         u64 titleId, u64 sizeBytes, const std::vector<u8>& iconBytes, bool isSd) {
+                         u64 titleId, u64 sizeBytes, u64 nandBytes, u64 sdBytes, const std::vector<u8>& iconBytes, bool isSd) {
         brls::Box* card = new brls::Box(brls::Axis::COLUMN);
         card->setWidth(680);
         card->setPadding(16, 20, 16, 20);
@@ -2128,10 +2176,23 @@ public:
         addDetailRow("Versión", version.empty() ? "1.0.0" : version);
 
         char szBuf[64];
-        if (sizeBytes < 1024*1024) snprintf(szBuf, sizeof(szBuf), "%.2f KB", sizeBytes / 1024.0);
-        else if (sizeBytes < 1024*1024*1024) snprintf(szBuf, sizeof(szBuf), "%.2f MB", sizeBytes / (1024.0*1024.0));
+        if (sizeBytes == 0) snprintf(szBuf, sizeof(szBuf), "0.0 MB");
+        else if (sizeBytes < 1024*1024) snprintf(szBuf, sizeof(szBuf), "%.2f KB", sizeBytes / 1024.0);
+        else if (sizeBytes < 1024ULL*1024*1024) snprintf(szBuf, sizeof(szBuf), "%.2f MB", sizeBytes / (1024.0*1024.0));
         else snprintf(szBuf, sizeof(szBuf), "%.2f GB", sizeBytes / (1024.0*1024.0*1024.0));
         addDetailRow("hints/prop_size"_i18n, szBuf);
+
+        char szNandBuf[64];
+        if (nandBytes == 0) snprintf(szNandBuf, sizeof(szNandBuf), "---");
+        else if (nandBytes < 1024ULL*1024*1024) snprintf(szNandBuf, sizeof(szNandBuf), "%.2f MB", nandBytes / (1024.0*1024.0));
+        else snprintf(szNandBuf, sizeof(szNandBuf), "%.2f GB", nandBytes / (1024.0*1024.0*1024.0));
+        addDetailRow("hints/nand_storage"_i18n, szNandBuf);
+
+        char szSdBuf[64];
+        if (sdBytes == 0) snprintf(szSdBuf, sizeof(szSdBuf), "---");
+        else if (sdBytes < 1024ULL*1024*1024) snprintf(szSdBuf, sizeof(szSdBuf), "%.2f MB", sdBytes / (1024.0*1024.0));
+        else snprintf(szSdBuf, sizeof(szSdBuf), "%.2f GB", sdBytes / (1024.0*1024.0*1024.0));
+        addDetailRow("hints/sd_storage"_i18n, szSdBuf);
         addDetailRow("hints/prop_path"_i18n, isSd ? "hints/sd_storage"_i18n : "hints/nand_storage"_i18n);
 
         brls::Dialog* d = new brls::Dialog(card);

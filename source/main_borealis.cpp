@@ -1670,16 +1670,7 @@ public:
             brls::Logger::info("GamesTab: llamando loadGamesAsync en willAppear");
             loadGamesAsync();
         }
-
-        brls::Box* boxGamesList = dynamic_cast<brls::Box*>(this->getView("boxGamesList"));
-        if (boxGamesList && !boxGamesList->getChildren().empty()) {
-            for (auto* child : boxGamesList->getChildren()) {
-                if (child->isFocusable()) {
-                    brls::Application::giveFocus(child);
-                    break;
-                }
-            }
-        }
+        brls::Logger::info("GamesTab: willAppear finalizado exitosamente");
     }
 
     ~GamesTab() override {
@@ -1804,215 +1795,239 @@ public:
             return;
         }
 
-
         std::shared_ptr<std::atomic<bool>> alive = m_alive;
         brls::Logger::info("GamesTab: Lanzando thread asincrono nsListApplicationRecord");
-        std::thread([this, alive]() {
-            try {
-                if (!*alive) return;
+        try {
+            std::thread([this, alive]() {
+                brls::Logger::info("GamesTab-Thread: Hilo asincrono iniciado con exito!");
+                try {
+                    if (!*alive) {
+                        brls::Logger::info("GamesTab-Thread: alive es false al iniciar hilo");
+                        return;
+                    }
 
 #ifdef __SWITCH__
-                Result rc = nsInitialize();
-                if (R_FAILED(rc)) {
-                    if (!*alive) return;
-                    brls::sync([this, alive]() {
+                    brls::Logger::info("GamesTab-Thread: llamando a nsInitialize()");
+                    Result rc = nsInitialize();
+                    brls::Logger::info("GamesTab-Thread: nsInitialize() retorno {:#x}", (u32)rc);
+                    if (R_FAILED(rc)) {
+                        brls::Logger::error("GamesTab-Thread: nsInitialize fallo con {:#x}", (u32)rc);
                         if (!*alive) return;
-                        brls::Box* boxGamesList = dynamic_cast<brls::Box*>(this->getView("boxGamesList"));
-                        if (boxGamesList) {
-                            boxGamesList->clearViews();
-                            brls::Label* err = new brls::Label();
-                            err->setText("No se pudo conectar al servicio de gestión de títulos.");
-                            err->setTextColor(brls::Application::getTheme()["brls/text_disabled"]);
-                            err->setMarginBottom(16);
-                            boxGamesList->addView(err);
+                        brls::sync([this, alive]() {
+                            if (!*alive) return;
+                            brls::Box* boxGamesList = dynamic_cast<brls::Box*>(this->getView("boxGamesList"));
+                            if (boxGamesList) {
+                                boxGamesList->clearViews();
+                                brls::Label* err = new brls::Label();
+                                err->setText("No se pudo conectar al servicio de gestión de títulos.");
+                                err->setTextColor(brls::Application::getTheme()["brls/text_disabled"]);
+                                err->setMarginBottom(16);
+                                boxGamesList->addView(err);
 
-                            brls::Box* btnBack = new brls::Box();
-                            btnBack->setFocusable(true);
-                            btnBack->setWidth(280);
-                            btnBack->setHeight(46);
-                            btnBack->setCornerRadius(6);
-                            btnBack->setBackgroundColor(nvgRGB(2, 132, 199));
-                            btnBack->setJustifyContent(brls::JustifyContent::CENTER);
-                            btnBack->setAlignItems(brls::AlignItems::CENTER);
-                            brls::Label* lblBack = new brls::Label();
-                            lblBack->setText("Volver al Menú Principal (B)");
-                            lblBack->setFontSize(15);
-                            lblBack->setTextColor(nvgRGB(255, 255, 255));
-                            btnBack->addView(lblBack);
-                            btnBack->registerClickAction([](brls::View*) {
-                                brls::Application::popActivity();
-                                return true;
-                            });
-                            boxGamesList->addView(btnBack);
-                            brls::Application::giveFocus(btnBack);
-                        }
-                    });
-                    return;
-                }
-
-                NsApplicationRecord records[128];
-                s32 entryCount = 0;
-                rc = nsListApplicationRecord(records, 128, 0, &entryCount);
-                if (R_FAILED(rc) || entryCount <= 0) {
-                    nsExit();
-                    if (!*alive) return;
-                    brls::sync([this, alive]() {
-                        if (!*alive) return;
-                        brls::Box* boxGamesList = dynamic_cast<brls::Box*>(this->getView("boxGamesList"));
-                        if (boxGamesList) {
-                            boxGamesList->clearViews();
-                            brls::Label* emptyLbl = new brls::Label();
-                            emptyLbl->setText("No se encontraron juegos o programas instalados.");
-                            emptyLbl->setTextColor(brls::Application::getTheme()["brls/text_disabled"]);
-                            emptyLbl->setMarginBottom(16);
-                            boxGamesList->addView(emptyLbl);
-
-                            brls::Box* btnBack = new brls::Box();
-                            btnBack->setFocusable(true);
-                            btnBack->setWidth(280);
-                            btnBack->setHeight(46);
-                            btnBack->setCornerRadius(6);
-                            btnBack->setBackgroundColor(nvgRGB(2, 132, 199));
-                            btnBack->setJustifyContent(brls::JustifyContent::CENTER);
-                            btnBack->setAlignItems(brls::AlignItems::CENTER);
-                            brls::Label* lblBack = new brls::Label();
-                            lblBack->setText("Volver al Menú Principal (B)");
-                            lblBack->setFontSize(15);
-                            lblBack->setTextColor(nvgRGB(255, 255, 255));
-                            btnBack->addView(lblBack);
-                            btnBack->registerClickAction([](brls::View*) {
-                                brls::Application::popActivity();
-                                return true;
-                            });
-                            boxGamesList->addView(btnBack);
-                            brls::Application::giveFocus(btnBack);
-                        }
-                    });
-                    return;
-                }
-
-                std::vector<LoadedGameInfo> games;
-                NsApplicationControlData* controlData = (NsApplicationControlData*)malloc(sizeof(NsApplicationControlData));
-
-                for (s32 i = 0; i < entryCount; i++) {
-                    if (!*alive) {
-                        break;
+                                brls::Box* btnBack = new brls::Box();
+                                btnBack->setFocusable(true);
+                                btnBack->setWidth(280);
+                                btnBack->setHeight(46);
+                                btnBack->setCornerRadius(6);
+                                btnBack->setBackgroundColor(nvgRGB(2, 132, 199));
+                                btnBack->setJustifyContent(brls::JustifyContent::CENTER);
+                                btnBack->setAlignItems(brls::AlignItems::CENTER);
+                                brls::Label* lblBack = new brls::Label();
+                                lblBack->setText("Volver al Menú Principal (B)");
+                                lblBack->setFontSize(15);
+                                lblBack->setTextColor(nvgRGB(255, 255, 255));
+                                btnBack->addView(lblBack);
+                                btnBack->registerClickAction([](brls::View*) {
+                                    brls::Application::popActivity();
+                                    return true;
+                                });
+                                boxGamesList->addView(btnBack);
+                                brls::Application::giveFocus(btnBack);
+                            }
+                        });
+                        return;
                     }
-                    u64 titleId = records[i].application_id;
-                    if (titleId == 0) continue;
 
-                    LoadedGameInfo g;
-                    g.titleId = titleId;
+                    brls::Logger::info("GamesTab-Thread: llamando a nsListApplicationRecord");
+                    NsApplicationRecord records[128];
+                    s32 entryCount = 0;
+                    rc = nsListApplicationRecord(records, 128, 0, &entryCount);
+                    brls::Logger::info("GamesTab-Thread: nsListApplicationRecord retorno {:#x}, entryCount={}", (u32)rc, entryCount);
+                    if (R_FAILED(rc) || entryCount <= 0) {
+                        brls::Logger::warning("GamesTab-Thread: sin titulos o fallo nsListApplicationRecord");
+                        nsExit();
+                        if (!*alive) return;
+                        brls::sync([this, alive]() {
+                            if (!*alive) return;
+                            brls::Box* boxGamesList = dynamic_cast<brls::Box*>(this->getView("boxGamesList"));
+                            if (boxGamesList) {
+                                boxGamesList->clearViews();
+                                brls::Label* emptyLbl = new brls::Label();
+                                emptyLbl->setText("No se encontraron juegos o programas instalados.");
+                                emptyLbl->setTextColor(brls::Application::getTheme()["brls/text_disabled"]);
+                                emptyLbl->setMarginBottom(16);
+                                boxGamesList->addView(emptyLbl);
+
+                                brls::Box* btnBack = new brls::Box();
+                                btnBack->setFocusable(true);
+                                btnBack->setWidth(280);
+                                btnBack->setHeight(46);
+                                btnBack->setCornerRadius(6);
+                                btnBack->setBackgroundColor(nvgRGB(2, 132, 199));
+                                btnBack->setJustifyContent(brls::JustifyContent::CENTER);
+                                btnBack->setAlignItems(brls::AlignItems::CENTER);
+                                brls::Label* lblBack = new brls::Label();
+                                lblBack->setText("Volver al Menú Principal (B)");
+                                lblBack->setFontSize(15);
+                                lblBack->setTextColor(nvgRGB(255, 255, 255));
+                                btnBack->addView(lblBack);
+                                btnBack->registerClickAction([](brls::View*) {
+                                    brls::Application::popActivity();
+                                    return true;
+                                });
+                                boxGamesList->addView(btnBack);
+                                brls::Application::giveFocus(btnBack);
+                            }
+                        });
+                        return;
+                    }
+
+                    std::vector<LoadedGameInfo> games;
+                    brls::Logger::info("GamesTab-Thread: reservando controlData");
+                    NsApplicationControlData* controlData = (NsApplicationControlData*)malloc(sizeof(NsApplicationControlData));
+
+                    for (s32 i = 0; i < entryCount; i++) {
+                        if (!*alive) {
+                            brls::Logger::info("GamesTab-Thread: alive cancelado durante bucle");
+                            break;
+                        }
+                        u64 titleId = records[i].application_id;
+                        if (titleId == 0) continue;
+
+                        LoadedGameInfo g;
+                        g.titleId = titleId;
+
+                        if (controlData) {
+                            memset(controlData, 0, sizeof(NsApplicationControlData));
+                            u64 actualSize = 0;
+                            Result crc = nsGetApplicationControlData(NsApplicationControlSource_Storage, titleId, controlData, sizeof(NsApplicationControlData), &actualSize);
+                            if (R_SUCCEEDED(crc)) {
+                                NacpLanguageEntry* langEntry = nullptr;
+                                if (R_SUCCEEDED(nacpGetLanguageEntry(&controlData->nacp, &langEntry)) && langEntry) {
+                                    if (langEntry->name[0] != '\0') {
+                                        g.titleName = langEntry->name;
+                                        g.author = langEntry->author;
+                                    }
+                                }
+                                g.version = controlData->nacp.display_version;
+                                if (actualSize > sizeof(controlData->nacp)) {
+                                    size_t iconSz = (size_t)(actualSize - sizeof(controlData->nacp));
+                                    if (iconSz > 0x20000) iconSz = 0x20000;
+                                    if (i < 20) {
+                                        g.iconBytes.assign((u8*)controlData->icon, (u8*)controlData->icon + iconSz);
+                                    }
+                                }
+                            }
+                        }
+
+                        if (g.titleName.empty()) {
+                            char tb[64];
+                            snprintf(tb, sizeof(tb), "Título [%016llX]", (unsigned long long)titleId);
+                            g.titleName = tb;
+                        }
+
+                        if (g.titleName.rfind("Autorun", 0) == 0 || g.titleName.rfind("autorun", 0) == 0) {
+                            g.titleName = "App - " + g.titleName;
+                        }
+
+                        struct AppOccupiedEntity {
+                            u8 storageId;
+                            u8 reserved[7];
+                            u64 appSize;
+                            u64 patchSize;
+                            u64 aocSize;
+                        };
+
+                        NsApplicationOccupiedSize occSize = {};
+                        memset(&occSize, 0, sizeof(occSize));
+                        if (R_SUCCEEDED(nsCalculateApplicationOccupiedSize(titleId, &occSize))) {
+                            AppOccupiedEntity entities[4];
+                            memcpy(entities, occSize.unk_x0, sizeof(entities));
+                            u64 sdTotal = 0;
+                            u64 nandTotal = 0;
+                            for (int e = 0; e < 4; e++) {
+                                if (entities[e].storageId == 0) continue;
+                                u64 entSum = entities[e].appSize + entities[e].patchSize + entities[e].aocSize;
+                                if (entities[e].storageId == 3 /* SdCard */ || entities[e].storageId == 5) {
+                                    sdTotal += entSum;
+                                } else if (entities[e].storageId == 1 || entities[e].storageId == 2 || entities[e].storageId == 4 /* Nand */) {
+                                    nandTotal += entSum;
+                                } else {
+                                    g.gameSize += entSum;
+                                }
+                            }
+                            g.gameSize += (sdTotal + nandTotal);
+                            g.isSd = (sdTotal >= nandTotal);
+                        }
+
+                        brls::Logger::info("GamesTab-Thread: [{}/{}] '{}' size={}", i + 1, entryCount, g.titleName, g.gameSize);
+                        games.push_back(std::move(g));
+                    }
 
                     if (controlData) {
-                        memset(controlData, 0, sizeof(NsApplicationControlData));
-                        u64 actualSize = 0;
-                        Result crc = nsGetApplicationControlData(NsApplicationControlSource_Storage, titleId, controlData, sizeof(NsApplicationControlData), &actualSize);
-                        if (R_SUCCEEDED(crc)) {
-                            NacpLanguageEntry* langEntry = nullptr;
-                            if (R_SUCCEEDED(nacpGetLanguageEntry(&controlData->nacp, &langEntry)) && langEntry) {
-                                if (langEntry->name[0] != '\0') {
-                                    g.titleName = langEntry->name;
-                                    g.author = langEntry->author;
-                                }
-                            }
-                            g.version = controlData->nacp.display_version;
-                            if (actualSize > sizeof(controlData->nacp)) {
-                                size_t iconSz = (size_t)(actualSize - sizeof(controlData->nacp));
-                                if (iconSz > 0x20000) iconSz = 0x20000;
-                                if (i < 20) {
-                                    g.iconBytes.assign((u8*)controlData->icon, (u8*)controlData->icon + iconSz);
-                                }
-                            }
-                        }
+                        free(controlData);
                     }
+                    nsExit();
+                    brls::Logger::info("GamesTab-Thread: nsExit completado, total juegos: {}", games.size());
 
-                    if (g.titleName.empty()) {
-                        char tb[64];
-                        snprintf(tb, sizeof(tb), "Título [%016llX]", (unsigned long long)titleId);
-                        g.titleName = tb;
-                    }
-
-                    if (g.titleName.rfind("Autorun", 0) == 0 || g.titleName.rfind("autorun", 0) == 0) {
-                        g.titleName = "App - " + g.titleName;
-                    }
-
-                    struct AppOccupiedEntity {
-                        u8 storageId;
-                        u8 reserved[7];
-                        u64 appSize;
-                        u64 patchSize;
-                        u64 aocSize;
-                    };
-
-                    NsApplicationOccupiedSize occSize = {};
-                    memset(&occSize, 0, sizeof(occSize));
-                    if (R_SUCCEEDED(nsCalculateApplicationOccupiedSize(titleId, &occSize))) {
-                        AppOccupiedEntity entities[4];
-                        memcpy(entities, occSize.unk_x0, sizeof(entities));
-                        u64 sdTotal = 0;
-                        u64 nandTotal = 0;
-                        for (int e = 0; e < 4; e++) {
-                            if (entities[e].storageId == 0) continue;
-                            u64 entSum = entities[e].appSize + entities[e].patchSize + entities[e].aocSize;
-                            if (entities[e].storageId == 3 /* SdCard */ || entities[e].storageId == 5) {
-                                sdTotal += entSum;
-                            } else if (entities[e].storageId == 1 || entities[e].storageId == 2 || entities[e].storageId == 4 /* Nand */) {
-                                nandTotal += entSum;
-                            } else {
-                                g.gameSize += entSum;
-                            }
-                        }
-                        g.gameSize += (sdTotal + nandTotal);
-                        g.isSd = (sdTotal >= nandTotal);
-                    }
-
-                    games.push_back(std::move(g));
-                }
-
-                if (controlData) {
-                    free(controlData);
-                }
-                nsExit();
-
-                if (!*alive) return;
-                brls::sync([this, alive, loaded = std::move(games)]() {
                     if (!*alive) return;
-                    brls::Box* boxGamesList = dynamic_cast<brls::Box*>(this->getView("boxGamesList"));
-                    if (!boxGamesList) return;
-                    boxGamesList->clearViews();
+                    brls::sync([this, alive, loaded = std::move(games)]() {
+                        if (!*alive) return;
+                        brls::Logger::info("GamesTab-UI: actualizando interfaz con {} juegos", loaded.size());
+                        brls::Box* boxGamesList = dynamic_cast<brls::Box*>(this->getView("boxGamesList"));
+                        if (!boxGamesList) return;
+                        boxGamesList->clearViews();
 
-                    for (const auto& g : loaded) {
-                        GameRowCell* cell = new GameRowCell(g.titleName, g.version, g.author, g.titleId, g.gameSize, g.iconBytes, g.isSd);
-                        std::string tn = g.titleName;
-                        std::string ver = g.version;
-                        std::string auth = g.author;
-                        u64 tid = g.titleId;
-                        u64 sz = g.gameSize;
-                        std::vector<u8> ic = g.iconBytes;
-                        bool isSd = g.isSd;
-                        cell->registerClickAction([this, tn, ver, auth, tid, sz, ic, isSd](brls::View*) {
-                            showGameDetails(tn, ver, auth, tid, sz, ic, isSd);
-                            return true;
-                        });
-                        boxGamesList->addView(cell);
+                        for (const auto& g : loaded) {
+                            GameRowCell* cell = new GameRowCell(g.titleName, g.version, g.author, g.titleId, g.gameSize, g.iconBytes, g.isSd);
+                            std::string tn = g.titleName;
+                            std::string ver = g.version;
+                            std::string auth = g.author;
+                            u64 tid = g.titleId;
+                            u64 sz = g.gameSize;
+                            std::vector<u8> ic = g.iconBytes;
+                            bool isSd = g.isSd;
+                            cell->registerClickAction([this, tn, ver, auth, tid, sz, ic, isSd](brls::View*) {
+                                showGameDetails(tn, ver, auth, tid, sz, ic, isSd);
+                                return true;
+                            });
+                            boxGamesList->addView(cell);
 
-                        brls::Box* sep = new brls::Box();
-                        sep->setWidthPercentage(100.0f);
-                        sep->setHeight(1);
-                        sep->setBackgroundColor(brls::Application::getTheme()["brls/sidebar/separator"]);
-                        boxGamesList->addView(sep);
-                    }
+                            brls::Box* sep = new brls::Box();
+                            sep->setWidthPercentage(100.0f);
+                            sep->setHeight(1);
+                            sep->setBackgroundColor(brls::Application::getTheme()["brls/sidebar/separator"]);
+                            boxGamesList->addView(sep);
+                        }
 
-                    if (!boxGamesList->getChildren().empty()) {
-                        brls::Application::giveFocus(boxGamesList->getChildren()[0]);
-                    }
-                });
+                        if (!boxGamesList->getChildren().empty()) {
+                            brls::Application::giveFocus(boxGamesList->getChildren()[0]);
+                        }
+                        brls::Logger::info("GamesTab-UI: interfaz de juegos renderizada");
+                    });
 #endif
-            } catch (...) {
-                brls::Logger::error("Excepción en loadGamesAsync");
-            }
-        }).detach();
+                } catch (const std::exception& e) {
+                    brls::Logger::error("Excepcion en hilo de GamesTab: {}", e.what());
+                } catch (...) {
+                    brls::Logger::error("Excepcion desconocida en hilo de GamesTab");
+                }
+            }).detach();
+            brls::Logger::info("GamesTab: std::thread().detach() ejecutado exitosamente");
+        } catch (const std::exception& e) {
+            brls::Logger::error("Excepcion al lanzar std::thread en GamesTab: {}", e.what());
+        } catch (...) {
+            brls::Logger::error("Excepcion desconocida al lanzar std::thread en GamesTab");
+        }
     }
 
     void showGameDetails(const std::string& name, const std::string& version, const std::string& author,

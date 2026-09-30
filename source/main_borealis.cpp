@@ -1612,9 +1612,6 @@ class GamesTab : public brls::Box {
 public:
     GamesTab() {
         brls::Logger::info("GamesTab: Iniciando constructor");
-        this->setFocusable(true);
-        this->setHideHighlightBackground(true);
-        this->setHideHighlightBorder(true);
         m_alive = std::make_shared<std::atomic<bool>>(true);
         try {
             brls::Logger::info("GamesTab: inflando XML");
@@ -1632,19 +1629,22 @@ public:
             brls::Logger::info("GamesTab: buscando boxGamesList");
             brls::Box* boxGamesList = dynamic_cast<brls::Box*>(this->getView("boxGamesList"));
             if (boxGamesList) {
-                boxGamesList->setFocusable(false);
-            }
+                boxGamesList->clearViews();
+                brls::Box* loadingBox = new brls::Box();
+                loadingBox->setFocusable(true);
+                loadingBox->setHideHighlightBackground(true);
+                loadingBox->setHideHighlightBorder(true);
+                loadingBox->setWidthPercentage(100.0f);
+                loadingBox->setHeight(50);
 
-#ifdef __SWITCH__
-            brls::Logger::info("GamesTab: comprobando modo applet");
-            if (appletGetAppletType() != AppletType_Application) {
-                brls::Logger::info("GamesTab: modo applet detectado, llamando setupAppletWarning");
-                setupAppletWarning();
-                return;
+                brls::Label* lblLoading = new brls::Label();
+                lblLoading->setText("Cargando títulos instalados...");
+                lblLoading->setFontSize(16);
+                lblLoading->setTextColor(brls::Application::getTheme()["brls/text_disabled"]);
+                lblLoading->setMarginTop(30);
+                loadingBox->addView(lblLoading);
+                boxGamesList->addView(loadingBox);
             }
-#endif
-            brls::Logger::info("GamesTab: llamando loadGamesAsync");
-            loadGamesAsync();
             brls::Logger::info("GamesTab: constructor finalizado con exito");
         } catch (const std::exception& e) {
             brls::Logger::error("Excepcion en GamesTab constructor: {}", e.what());
@@ -1655,6 +1655,22 @@ public:
 
     void willAppear(bool resetState = false) override {
         brls::Box::willAppear(resetState);
+        brls::Logger::info("GamesTab: willAppear llamado (m_loaded={})", m_loaded);
+
+        if (!m_loaded) {
+            m_loaded = true;
+#ifdef __SWITCH__
+            brls::Logger::info("GamesTab: comprobando modo applet en willAppear");
+            if (appletGetAppletType() != AppletType_Application) {
+                brls::Logger::info("GamesTab: modo applet detectado, llamando setupAppletWarning");
+                setupAppletWarning();
+                return;
+            }
+#endif
+            brls::Logger::info("GamesTab: llamando loadGamesAsync en willAppear");
+            loadGamesAsync();
+        }
+
         brls::Box* boxGamesList = dynamic_cast<brls::Box*>(this->getView("boxGamesList"));
         if (boxGamesList && !boxGamesList->getChildren().empty()) {
             for (auto* child : boxGamesList->getChildren()) {
@@ -1787,23 +1803,7 @@ public:
             brls::Logger::info("GamesTab: loadGamesAsync abortado, no boxGamesList");
             return;
         }
-        boxGamesList->clearViews();
 
-        brls::Box* loadingBox = new brls::Box();
-        loadingBox->setFocusable(true);
-        loadingBox->setHideHighlightBackground(true);
-        loadingBox->setHideHighlightBorder(true);
-        loadingBox->setWidthPercentage(100.0f);
-        loadingBox->setHeight(50);
-
-        brls::Label* lblLoading = new brls::Label();
-        lblLoading->setText("Cargando títulos instalados...");
-        lblLoading->setFontSize(16);
-        lblLoading->setTextColor(brls::Application::getTheme()["brls/text_disabled"]);
-        lblLoading->setMarginTop(30);
-        loadingBox->addView(lblLoading);
-        boxGamesList->addView(loadingBox);
-        brls::Application::giveFocus(loadingBox);
 
         std::shared_ptr<std::atomic<bool>> alive = m_alive;
         brls::Logger::info("GamesTab: Lanzando thread asincrono nsListApplicationRecord");
@@ -2109,6 +2109,7 @@ public:
 
 private:
     std::shared_ptr<std::atomic<bool>> m_alive;
+    bool m_loaded = false;
 };
 
 // --- Tab 3: USB MTP Responder ---
@@ -3185,6 +3186,7 @@ int main(int argc, char* argv[]) {
     mkdir("sdmc:/switch/FileZzz", 0777);
     FILE* logf = fopen("sdmc:/switch/FileZzz/filezzz.log", "w");
     if (logf) {
+        setvbuf(logf, NULL, _IONBF, 0);
         brls::Logger::setLogLevel(brls::LogLevel::LOG_DEBUG);
         brls::Logger::setLogOutput(logf);
         brls::Logger::info("FileZzz Borealis iniciando...");

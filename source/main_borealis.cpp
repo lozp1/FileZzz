@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <unistd.h>
+#include <malloc.h>
 #include <vector>
 #include <string>
 #include <algorithm>
@@ -1893,8 +1894,13 @@ public:
                     }
 
                     std::vector<LoadedGameInfo> games;
-                    brls::Logger::info("GamesTab-Thread: reservando controlData");
-                    NsApplicationControlData* controlData = (NsApplicationControlData*)malloc(sizeof(NsApplicationControlData));
+                    brls::Logger::info("GamesTab-Thread: reservando controlData con memalign (alineado a 4KB)");
+                    NsApplicationControlData* controlData = (NsApplicationControlData*)memalign(0x1000, sizeof(NsApplicationControlData));
+                    if (!controlData) {
+                        brls::Logger::error("GamesTab-Thread: fallo memalign, usando malloc");
+                        controlData = (NsApplicationControlData*)malloc(sizeof(NsApplicationControlData));
+                    }
+                    brls::Logger::info("GamesTab-Thread: controlData reservado en puntero {:p}", (void*)controlData);
 
                     for (s32 i = 0; i < entryCount; i++) {
                         if (!*alive) {
@@ -1904,13 +1910,17 @@ public:
                         u64 titleId = records[i].application_id;
                         if (titleId == 0) continue;
 
+                        brls::Logger::info("GamesTab-Thread: [{}/{}] Procesando titleId={:#018x}", i + 1, entryCount, titleId);
+
                         LoadedGameInfo g;
                         g.titleId = titleId;
 
                         if (controlData) {
                             memset(controlData, 0, sizeof(NsApplicationControlData));
                             u64 actualSize = 0;
+                            brls::Logger::info("GamesTab-Thread: [{}/{}] Llamando nsGetApplicationControlData...", i + 1, entryCount);
                             Result crc = nsGetApplicationControlData(NsApplicationControlSource_Storage, titleId, controlData, sizeof(NsApplicationControlData), &actualSize);
+                            brls::Logger::info("GamesTab-Thread: [{}/{}] nsGetApplicationControlData retorno {:#x}, actualSize={}", i + 1, entryCount, (u32)crc, actualSize);
                             if (R_SUCCEEDED(crc)) {
                                 NacpLanguageEntry* langEntry = nullptr;
                                 if (R_SUCCEEDED(nacpGetLanguageEntry(&controlData->nacp, &langEntry)) && langEntry) {
@@ -1948,9 +1958,12 @@ public:
                             u64 aocSize;
                         };
 
-                        NsApplicationOccupiedSize occSize = {};
+                        alignas(16) NsApplicationOccupiedSize occSize = {};
                         memset(&occSize, 0, sizeof(occSize));
-                        if (R_SUCCEEDED(nsCalculateApplicationOccupiedSize(titleId, &occSize))) {
+                        brls::Logger::info("GamesTab-Thread: [{}/{}] Llamando nsCalculateApplicationOccupiedSize...", i + 1, entryCount);
+                        Result occRc = nsCalculateApplicationOccupiedSize(titleId, &occSize);
+                        brls::Logger::info("GamesTab-Thread: [{}/{}] nsCalculateApplicationOccupiedSize retorno {:#x}", i + 1, entryCount, (u32)occRc);
+                        if (R_SUCCEEDED(occRc)) {
                             AppOccupiedEntity entities[4];
                             memcpy(entities, occSize.unk_x0, sizeof(entities));
                             u64 sdTotal = 0;

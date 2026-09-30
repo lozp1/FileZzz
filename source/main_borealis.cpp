@@ -301,7 +301,9 @@ inline void runFileOperation(const std::string& opTitle, const std::vector<std::
     d->setCancelable(false);
     d->open();
 
-    std::thread([srcPaths, destDir, isCut, onDone, d, lblCurrent, barFill, lblStats]() {
+    auto isDialogAlive = std::make_shared<std::atomic<bool>>(true);
+
+    std::thread([srcPaths, destDir, isCut, onDone, d, lblCurrent, barFill, lblStats, isDialogAlive]() {
         u64 totalBytes = 0;
         for (const auto& p : srcPaths) {
             struct stat st;
@@ -319,9 +321,13 @@ inline void runFileOperation(const std::string& opTitle, const std::vector<std::
             std::string name = (slash != std::string::npos) ? src.substr(slash + 1) : src;
             std::string dst = destDir + (destDir.back() == '/' ? "" : "/") + name;
 
-            brls::sync([lblCurrent, name, i, srcPaths]() {
-                lblCurrent->setText("[" + std::to_string(i + 1) + "/" + std::to_string(srcPaths.size()) + "] " + name);
-            });
+            if (*isDialogAlive) {
+                brls::sync([lblCurrent, name, i, srcPaths, isDialogAlive]() {
+                    if (*isDialogAlive) {
+                        lblCurrent->setText("[" + std::to_string(i + 1) + "/" + std::to_string(srcPaths.size()) + "] " + name);
+                    }
+                });
+            }
 
             struct stat st;
             bool isDir = (stat(src.c_str(), &st) == 0 && S_ISDIR(st.st_mode));
@@ -352,13 +358,17 @@ inline void runFileOperation(const std::string& opTitle, const std::vector<std::
                         double spd = dt > 0.05 ? (double)transferred / (dt * 1024.0 * 1024.0) : 0;
                         float pct = (totalBytes > 0) ? (float)transferred / (float)totalBytes : 0.5f;
                         if (pct > 1.0f) pct = 1.0f;
-                        brls::sync([barFill, lblStats, pct, transferred, totalBytes, spd]() {
-                            barFill->setWidth(pct * 512.0f);
-                            char b[128];
-                            snprintf(b, sizeof(b), "%.1f%% · %.1f MB / %.1f MB (%.1f MB/s)",
-                                     pct * 100.0f, transferred / (1024.0*1024.0), totalBytes / (1024.0*1024.0), spd);
-                            lblStats->setText(b);
-                        });
+                        if (*isDialogAlive) {
+                            brls::sync([barFill, lblStats, pct, transferred, totalBytes, spd, isDialogAlive]() {
+                                if (*isDialogAlive) {
+                                    barFill->setWidth(pct * 512.0f);
+                                    char b[128];
+                                    snprintf(b, sizeof(b), "%.1f%% · %.1f MB / %.1f MB (%.1f MB/s)",
+                                             pct * 100.0f, transferred / (1024.0*1024.0), totalBytes / (1024.0*1024.0), spd);
+                                    lblStats->setText(b);
+                                }
+                            });
+                        }
                         tLastUpdate = now;
                     }
                 });
@@ -372,13 +382,17 @@ inline void runFileOperation(const std::string& opTitle, const std::vector<std::
                         double spd = dt > 0.05 ? (double)transferred / (dt * 1024.0 * 1024.0) : 0;
                         float pct = (totalBytes > 0) ? (float)transferred / (float)totalBytes : 0.0f;
                         if (pct > 1.0f) pct = 1.0f;
-                        brls::sync([barFill, lblStats, pct, transferred, totalBytes, spd]() {
-                            barFill->setWidth(pct * 512.0f);
-                            char b[128];
-                            snprintf(b, sizeof(b), "%.1f%% · %.1f MB / %.1f MB (%.1f MB/s)",
-                                     pct * 100.0f, transferred / (1024.0*1024.0), totalBytes / (1024.0*1024.0), spd);
-                            lblStats->setText(b);
-                        });
+                        if (*isDialogAlive) {
+                            brls::sync([barFill, lblStats, pct, transferred, totalBytes, spd, isDialogAlive]() {
+                                if (*isDialogAlive) {
+                                    barFill->setWidth(pct * 512.0f);
+                                    char b[128];
+                                    snprintf(b, sizeof(b), "%.1f%% · %.1f MB / %.1f MB (%.1f MB/s)",
+                                             pct * 100.0f, transferred / (1024.0*1024.0), totalBytes / (1024.0*1024.0), spd);
+                                    lblStats->setText(b);
+                                }
+                            });
+                        }
                         tLastUpdate = now;
                     }
                 });
@@ -386,7 +400,11 @@ inline void runFileOperation(const std::string& opTitle, const std::vector<std::
             }
         }
 
-        brls::sync([d, onDone]() {
+        // Dar un breve retraso para asegurar que la animación de apertura del diálogo no colisione con el cierre
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+
+        brls::sync([d, onDone, isDialogAlive]() {
+            *isDialogAlive = false;
             d->close([onDone]() {
                 if (onDone) onDone();
                 brls::Application::notify("hints/op_finished"_i18n);
@@ -1129,6 +1147,9 @@ public:
         updateItemCountLabel();
         if (!boxFiles->getChildren().empty()) {
             brls::Application::giveFocus(boxFiles->getChildren()[0]);
+        } else {
+            brls::Box* btnTopOptions = dynamic_cast<brls::Box*>(this->getView("btnTopOptions"));
+            if (btnTopOptions) brls::Application::giveFocus(btnTopOptions);
         }
     }
 
@@ -1161,8 +1182,33 @@ public:
         }
         std::vector<std::string> paths = g_clipboardPaths;
         bool isCut = g_clipboardIsCut;
-        std::string dest = currentPath;
-        runFileOperation(isCut ? "hints/moving"_i18n : "hints/copying"_i18n, paths, dest, isCut, [this, isCut]() {
+        std::string destDir = currentPath;
+
+        // Si es cortar/mover un archivo/carpeta único en el mismo sistema de archivos, mover directamente
+        if (isCut && paths.size() == 1) {
+            std::string src = paths[0];
+            while (src.length() > 1 && src.back() == '/') src.pop_back();
+            size_t slash = src.find_last_of('/');
+            std::string name = (slash != std::string::npos) ? src.substr(slash + 1) : src;
+            std::string dst = destDir + (destDir.back() == '/' ? "" : "/") + name;
+            if (src == dst) {
+                g_clipboardPaths.clear();
+                g_clipboardIsCut = false;
+                m_selectedPaths.clear();
+                refreshList();
+                return;
+            }
+            if (rename(src.c_str(), dst.c_str()) == 0) {
+                g_clipboardPaths.clear();
+                g_clipboardIsCut = false;
+                m_selectedPaths.clear();
+                refreshList();
+                brls::Application::notify("hints/op_finished"_i18n);
+                return;
+            }
+        }
+
+        runFileOperation(isCut ? "hints/moving"_i18n : "hints/copying"_i18n, paths, destDir, isCut, [this, isCut]() {
             if (isCut) {
                 g_clipboardPaths.clear();
                 g_clipboardIsCut = false;
@@ -1361,8 +1407,9 @@ public:
             row->addView(lbl);
 
             row->registerClickAction([d, cb](brls::View*) {
-                d->close();
-                cb();
+                d->close([cb]() {
+                    cb();
+                });
                 return true;
             });
 
@@ -1565,6 +1612,9 @@ class GamesTab : public brls::Box {
 public:
     GamesTab() {
         brls::Logger::info("GamesTab: Iniciando constructor");
+        this->setFocusable(true);
+        this->setHideHighlightBackground(true);
+        this->setHideHighlightBorder(true);
         m_alive = std::make_shared<std::atomic<bool>>(true);
         try {
             brls::Logger::info("GamesTab: inflando XML");
@@ -1582,12 +1632,7 @@ public:
             brls::Logger::info("GamesTab: buscando boxGamesList");
             brls::Box* boxGamesList = dynamic_cast<brls::Box*>(this->getView("boxGamesList"));
             if (boxGamesList) {
-                brls::Logger::info("GamesTab: haciendo boxGamesList enfocable");
-                boxGamesList->setFocusable(true);
-                boxGamesList->setHideHighlightBackground(true);
-                boxGamesList->setHideHighlightBorder(true);
-            } else {
-                brls::Logger::info("GamesTab: ADVERTENCIA boxGamesList no encontrado");
+                boxGamesList->setFocusable(false);
             }
 
 #ifdef __SWITCH__
@@ -1605,6 +1650,19 @@ public:
             brls::Logger::error("Excepcion en GamesTab constructor: {}", e.what());
         } catch (...) {
             brls::Logger::error("Excepcion desconocida en GamesTab constructor");
+        }
+    }
+
+    void willAppear(bool resetState = false) override {
+        brls::Box::willAppear(resetState);
+        brls::Box* boxGamesList = dynamic_cast<brls::Box*>(this->getView("boxGamesList"));
+        if (boxGamesList && !boxGamesList->getChildren().empty()) {
+            for (auto* child : boxGamesList->getChildren()) {
+                if (child->isFocusable()) {
+                    brls::Application::giveFocus(child);
+                    break;
+                }
+            }
         }
     }
 
@@ -1655,6 +1713,7 @@ public:
             return true;
         });
         boxGamesList->addView(btnBack);
+        brls::Application::giveFocus(btnBack);
         brls::Logger::info("GamesTab: Saliendo de setupAppletWarning");
     }
 
@@ -1669,50 +1728,56 @@ public:
     };
 
     void updateStorageGauges() {
-        brls::Logger::info("GamesTab: Entrando a updateStorageGauges");
-        brls::Box* barNandFill = dynamic_cast<brls::Box*>(this->getView("barNandFill"));
-        brls::Label* lblNandFree = dynamic_cast<brls::Label*>(this->getView("lblNandFree"));
-        brls::Box* barSdFill = dynamic_cast<brls::Box*>(this->getView("barSdFill"));
-        brls::Label* lblSdFree = dynamic_cast<brls::Label*>(this->getView("lblSdFree"));
+        try {
+            brls::Logger::info("GamesTab: Entrando a updateStorageGauges");
+            brls::Box* barNandFill = dynamic_cast<brls::Box*>(this->getView("barNandFill"));
+            brls::Label* lblNandFree = dynamic_cast<brls::Label*>(this->getView("lblNandFree"));
+            brls::Box* barSdFill = dynamic_cast<brls::Box*>(this->getView("barSdFill"));
+            brls::Label* lblSdFree = dynamic_cast<brls::Label*>(this->getView("lblSdFree"));
 
-        u64 nandFree = 0, nandTotal = 0;
-        brls::Logger::info("GamesTab: Llamando getNandStorageInfo");
-        if (getNandStorageInfo(nandFree, nandTotal) && nandTotal > 0) {
-            float nandUsedPct = (float)(nandTotal - nandFree) / (float)nandTotal;
-            if (barNandFill) barNandFill->setWidth((int)(320.0f * nandUsedPct));
-            if (lblNandFree) {
-                char buf[64];
-                snprintf(buf, sizeof(buf), "%.1f GB", nandFree / (1024.0 * 1024.0 * 1024.0));
-                lblNandFree->setText(buf);
+            u64 nandFree = 0, nandTotal = 0;
+            brls::Logger::info("GamesTab: Llamando getNandStorageInfo");
+            if (getNandStorageInfo(nandFree, nandTotal) && nandTotal > 0) {
+                float nandUsedPct = (float)(nandTotal - nandFree) / (float)nandTotal;
+                if (nandUsedPct < 0.0f) nandUsedPct = 0.0f;
+                if (nandUsedPct > 1.0f) nandUsedPct = 1.0f;
+                if (barNandFill) barNandFill->setWidth((int)(320.0f * nandUsedPct));
+                if (lblNandFree) {
+                    char buf[64];
+                    snprintf(buf, sizeof(buf), "%.1f GB", nandFree / (1024.0 * 1024.0 * 1024.0));
+                    lblNandFree->setText(buf);
+                }
+            } else {
+                if (lblNandFree) lblNandFree->setText("---");
             }
-        } else {
-            if (lblNandFree) lblNandFree->setText("---");
-        }
 
-        u64 sdFree = 0, sdTotal = 0;
-        brls::Logger::info("GamesTab: Llamando getStorageInfo sdmc:/");
-        bool hasSd = getStorageInfo("sdmc:/", sdFree, sdTotal);
-        brls::Logger::info("GamesTab: getStorageInfo retorno {}", hasSd);
-        if (hasSd && sdTotal > 0) {
-            // guarda de underflow: free nunca puede ser mayor que total
-            u64 sdUsed = (sdFree <= sdTotal) ? (sdTotal - sdFree) : 0;
-            float sdUsedPct = (float)sdUsed / (float)sdTotal;
-            // clamp a [0.0, 1.0] por si acaso
-            if (sdUsedPct < 0.0f) sdUsedPct = 0.0f;
-            if (sdUsedPct > 1.0f) sdUsedPct = 1.0f;
-            brls::Logger::info("GamesTab: SD used={} pct={:.2f}", sdUsed, sdUsedPct);
-            if (barSdFill) {
-                brls::Logger::info("GamesTab: setWidth barSdFill");
-                barSdFill->setWidth((int)(320.0f * sdUsedPct));
+            u64 sdFree = 0, sdTotal = 0;
+            brls::Logger::info("GamesTab: Llamando getStorageInfo sdmc:/");
+            bool hasSd = getStorageInfo("sdmc:/", sdFree, sdTotal);
+            brls::Logger::info("GamesTab: getStorageInfo retorno {}", hasSd);
+            if (hasSd && sdTotal > 0) {
+                // guarda de underflow: free nunca puede ser mayor que total
+                u64 sdUsed = (sdFree <= sdTotal) ? (sdTotal - sdFree) : 0;
+                float sdUsedPct = (float)sdUsed / (float)sdTotal;
+                // clamp a [0.0, 1.0] por si acaso
+                if (sdUsedPct < 0.0f) sdUsedPct = 0.0f;
+                if (sdUsedPct > 1.0f) sdUsedPct = 1.0f;
+                brls::Logger::info("GamesTab: SD used={} pct={:.2f}", sdUsed, sdUsedPct);
+                if (barSdFill) {
+                    brls::Logger::info("GamesTab: setWidth barSdFill");
+                    barSdFill->setWidth((int)(320.0f * sdUsedPct));
+                }
+                if (lblSdFree) {
+                    brls::Logger::info("GamesTab: setText lblSdFree");
+                    char buf[64];
+                    snprintf(buf, sizeof(buf), "%.1f GB", sdFree / (1024.0 * 1024.0 * 1024.0));
+                    lblSdFree->setText(buf);
+                }
             }
-            if (lblSdFree) {
-                brls::Logger::info("GamesTab: setText lblSdFree");
-                char buf[64];
-                snprintf(buf, sizeof(buf), "%.1f GB", sdFree / (1024.0 * 1024.0 * 1024.0));
-                lblSdFree->setText(buf);
-            }
+            brls::Logger::info("GamesTab: Saliendo de updateStorageGauges");
+        } catch (...) {
+            brls::Logger::error("GamesTab: Excepción en updateStorageGauges");
         }
-        brls::Logger::info("GamesTab: Saliendo de updateStorageGauges");
     }
 
     void loadGamesAsync() {
@@ -1738,6 +1803,7 @@ public:
         lblLoading->setMarginTop(30);
         loadingBox->addView(lblLoading);
         boxGamesList->addView(loadingBox);
+        brls::Application::giveFocus(loadingBox);
 
         std::shared_ptr<std::atomic<bool>> alive = m_alive;
         brls::Logger::info("GamesTab: Lanzando thread asincrono nsListApplicationRecord");
@@ -1778,6 +1844,7 @@ public:
                                 return true;
                             });
                             boxGamesList->addView(btnBack);
+                            brls::Application::giveFocus(btnBack);
                         }
                     });
                     return;
@@ -1818,6 +1885,7 @@ public:
                                 return true;
                             });
                             boxGamesList->addView(btnBack);
+                            brls::Application::giveFocus(btnBack);
                         }
                     });
                     return;
@@ -1934,6 +2002,10 @@ public:
                         sep->setHeight(1);
                         sep->setBackgroundColor(brls::Application::getTheme()["brls/sidebar/separator"]);
                         boxGamesList->addView(sep);
+                    }
+
+                    if (!boxGamesList->getChildren().empty()) {
+                        brls::Application::giveFocus(boxGamesList->getChildren()[0]);
                     }
                 });
 #endif

@@ -4,6 +4,7 @@
 
 #include <switch.h>
 #include "mtp_usb.hpp"
+#include "ncm_installer.hpp"
 #include "config.hpp"
 #include <dirent.h>
 #include <sys/stat.h>
@@ -1203,9 +1204,21 @@ inline void worker() {
             char logMsg[128];
             std::string finalName = g_pendingSendPath.substr(g_pendingSendPath.find_last_of('/') + 1);
             if (g_pendingSendStorage == STORAGE_INSTALL_SD || g_pendingSendStorage == STORAGE_INSTALL_NAND) {
-                snprintf(logMsg, sizeof(logMsg), "Instalador: %s guardado (%.1f MB)",
+                snprintf(logMsg, sizeof(logMsg), "Instalador MTP: %s recibido (%.1f MB)",
                          finalName.c_str(), (double)totalReceived / (1024.0 * 1024.0));
                 mtp_usb::mlog(logMsg);
+
+                NcmStorageId targetSt = (g_pendingSendStorage == STORAGE_INSTALL_SD) ? NcmStorageId_SdCard : NcmStorageId_BuiltInUser;
+                mtp_usb::mlog("Instalador MTP: Registrando juego en Horizon OS...");
+                auto res = installer::NcmInstaller::installFromNsp(g_pendingSendPath, targetSt, [](u64, u64, float, const std::string&) {});
+                if (res.success) {
+                    mtp_usb::mlog("Instalador MTP: ¡Juego instalado con exito en consola!");
+                    remove(g_pendingSendPath.c_str());
+                } else {
+                    char errM[128];
+                    snprintf(errM, sizeof(errM), "Instalador MTP: Error (%.90s)", res.error.c_str());
+                    mtp_usb::mlog(errM);
+                }
             } else {
                 snprintf(logMsg, sizeof(logMsg), "Guardado: %s (%.1f MB)",
                          finalName.c_str(), (double)totalReceived / (1024.0 * 1024.0));

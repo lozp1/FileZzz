@@ -14,6 +14,7 @@
 
 #include "mtp_usb.hpp"
 #include "mtp_ops.hpp"
+#include "ncm_installer.hpp"
 #include "ftp_server.hpp"
 #include "config.hpp"
 #include "sys_clock.hpp"
@@ -590,7 +591,8 @@ enum class ActionIconType {
     DELETE,
     PROPERTIES,
     UNSELECT,
-    CANCEL
+    CANCEL,
+    INSTALL
 };
 
 class ActionIconView : public brls::View {
@@ -750,6 +752,24 @@ public:
                 nvgLineTo(vg, cx + 3.5f, cy + 3.5f);
                 nvgMoveTo(vg, cx + 3.5f, cy - 3.5f);
                 nvgLineTo(vg, cx - 3.5f, cy + 3.5f);
+                nvgStroke(vg);
+                break;
+            }
+            case ActionIconType::INSTALL: {
+                nvgStrokeColor(vg, col);
+                nvgStrokeWidth(vg, 2.0f);
+                nvgBeginPath(vg);
+                nvgMoveTo(vg, cx, y + 4.0f);
+                nvgLineTo(vg, cx, y + 14.0f);
+                nvgStroke(vg);
+                nvgBeginPath(vg);
+                nvgMoveTo(vg, cx - 4.5f, y + 9.5f);
+                nvgLineTo(vg, cx, y + 14.0f);
+                nvgLineTo(vg, cx + 4.5f, y + 9.5f);
+                nvgStroke(vg);
+                nvgBeginPath(vg);
+                nvgMoveTo(vg, x + 4.0f, y + 18.0f);
+                nvgLineTo(vg, x + 20.0f, y + 18.0f);
                 nvgStroke(vg);
                 break;
             }
@@ -1116,7 +1136,17 @@ public:
                     if (!m_selectedPaths.empty()) {
                         toggleSelection(fullPath, cell);
                     } else {
-                        showFileProperties(fullPath, name, false, sz, mt);
+                        size_t dot = name.find_last_of('.');
+                        std::string ext = "";
+                        if (dot != std::string::npos) {
+                            ext = name.substr(dot);
+                            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                        }
+                        if (ext == ".nsp") {
+                            promptInstallNsp(fullPath, name);
+                        } else {
+                            showFileProperties(fullPath, name, false, sz, mt);
+                        }
                     }
                     return true;
                 });
@@ -1349,6 +1379,201 @@ public:
         d->open();
     }
 
+    void promptInstallNsp(const std::string& fullPath, const std::string& name) {
+        brls::Box* box = new brls::Box(brls::Axis::COLUMN);
+        box->setWidth(600);
+        box->setPadding(20, 24, 16, 24);
+
+        brls::Label* lblTitle = new brls::Label();
+        lblTitle->setText("Instalar paquete NSP");
+        lblTitle->setFontSize(22);
+        lblTitle->setTextColor(brls::Application::getTheme()["brls/text"]);
+        lblTitle->setMarginBottom(8);
+        box->addView(lblTitle);
+
+        brls::Label* lblSub = new brls::Label();
+        lblSub->setText(name);
+        lblSub->setFontSize(14);
+        lblSub->setTextColor(brls::Application::getTheme()["brls/text_disabled"]);
+        lblSub->setMarginBottom(18);
+        box->addView(lblSub);
+
+        brls::Label* lblDest = new brls::Label();
+        lblDest->setText("Selecciona el almacenamiento destino:");
+        lblDest->setFontSize(16);
+        lblDest->setTextColor(brls::Application::getTheme()["brls/text"]);
+        lblDest->setMarginBottom(14);
+        box->addView(lblDest);
+
+        brls::Dialog* d = new brls::Dialog(box);
+
+        auto addDestBtn = [&](const std::string& label, NcmStorageId stId) {
+            brls::Box* btn = new brls::Box(brls::Axis::ROW);
+            btn->setFocusable(true);
+            btn->setWidthPercentage(100.0f);
+            btn->setHeight(48);
+            btn->setAlignItems(brls::AlignItems::CENTER);
+            btn->setPadding(0, 16, 0, 16);
+            btn->setCornerRadius(6);
+            btn->setBackgroundColor(brls::Application::getTheme()["brls/sidebar/item_active_background"]);
+            btn->setMarginBottom(10);
+
+            brls::Label* l = new brls::Label();
+            l->setText(label);
+            l->setFontSize(15);
+            l->setTextColor(brls::Application::getTheme()["brls/text"]);
+            btn->addView(l);
+
+            btn->registerClickAction([this, d, fullPath, name, stId](brls::View*) {
+                d->close([this, fullPath, name, stId]() {
+                    startNspInstall(fullPath, name, stId);
+                });
+                return true;
+            });
+            box->addView(btn);
+        };
+
+        addDestBtn("Tarjeta microSD", NcmStorageId_SdCard);
+        addDestBtn("Memoria de la consola (NAND)", NcmStorageId_BuiltInUser);
+
+        d->addButton("hints/cancel"_i18n, []() {});
+        d->open();
+    }
+
+    void startNspInstall(const std::string& fullPath, const std::string& name, NcmStorageId stId) {
+        brls::Box* container = new brls::Box(brls::Axis::COLUMN);
+        container->setWidth(560);
+        container->setPadding(24, 24, 24, 24);
+
+        brls::Label* lblTitle = new brls::Label();
+        lblTitle->setText("Instalando: " + name);
+        lblTitle->setFontSize(18);
+        lblTitle->setTextColor(brls::Application::getTheme()["brls/text"]);
+        lblTitle->setMarginBottom(12);
+        container->addView(lblTitle);
+
+        brls::Label* lblCurrent = new brls::Label();
+        lblCurrent->setText("Iniciando instalacion...");
+        lblCurrent->setFontSize(14);
+        lblCurrent->setTextColor(brls::Application::getTheme()["brls/text_disabled"]);
+        lblCurrent->setMarginBottom(14);
+        container->addView(lblCurrent);
+
+        brls::Box* barBg = new brls::Box();
+        barBg->setWidth(512);
+        barBg->setHeight(14);
+        barBg->setCornerRadius(3);
+        barBg->setBackgroundColor(nvgRGB(42, 46, 57));
+        barBg->setMarginBottom(10);
+
+        brls::Box* barFill = new brls::Box();
+        barFill->setWidth(0);
+        barFill->setHeight(14);
+        barFill->setCornerRadius(3);
+        barFill->setBackgroundColor(nvgRGB(0, 230, 168)); // Cian Horizon
+        barBg->addView(barFill);
+        container->addView(barBg);
+
+        brls::Label* lblStats = new brls::Label();
+        lblStats->setText("0% · 0.0 MB/s");
+        lblStats->setFontSize(13);
+        lblStats->setTextColor(brls::Application::getTheme()["brls/text_disabled"]);
+        container->addView(lblStats);
+
+        brls::Dialog* d = new brls::Dialog(container);
+        d->setCancelable(false);
+        auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
+        auto isDialogAlive = std::make_shared<std::atomic<bool>>(true);
+
+        d->addButton("hints/cancel"_i18n, [cancelFlag]() {
+            cancelFlag->store(true);
+        });
+        d->open();
+
+        struct InstallContext {
+            std::string path;
+            std::string name;
+            NcmStorageId storageId;
+            std::shared_ptr<std::atomic<bool>> cancel;
+            std::shared_ptr<std::atomic<bool>> dialogAlive;
+            brls::Dialog* dialog;
+            brls::Label* lblCurrent;
+            brls::Box* barFill;
+            brls::Label* lblStats;
+            ExplorerTab* tab;
+        };
+
+        auto* ctx = new InstallContext{
+            fullPath, name, stId, cancelFlag, isDialogAlive, d, lblCurrent, barFill, lblStats, this
+        };
+
+        pthread_t th;
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setstacksize(&attr, 256 * 1024);
+
+        pthread_create(&th, &attr, [](void* arg) -> void* {
+            auto* c = static_cast<InstallContext*>(arg);
+            auto lastUiUpdate = std::chrono::steady_clock::now();
+
+            auto onProgress = [c, &lastUiUpdate](u64 cur, u64 tot, float mbps, const std::string& ncaName) {
+                auto now = std::chrono::steady_clock::now();
+                if (std::chrono::duration<double>(now - lastUiUpdate).count() < 0.1 && cur < tot) return;
+                lastUiUpdate = now;
+
+                if (!c->dialogAlive->load()) return;
+                float pct = (tot > 0) ? (float)cur / (float)tot : 0.0f;
+                if (pct > 1.0f) pct = 1.0f;
+
+                brls::sync([c, cur, tot, mbps, ncaName, pct]() {
+                    if (!c->dialogAlive->load()) return;
+                    c->lblCurrent->setText(ncaName);
+                    c->barFill->setWidth(pct * 512.0f);
+                    char buf[128];
+                    snprintf(buf, sizeof(buf), "%.1f%% · %.1f MB / %.1f MB (%.1f MB/s)",
+                             pct * 100.0f, cur / (1024.0 * 1024.0), tot / (1024.0 * 1024.0), mbps);
+                    c->lblStats->setText(buf);
+                });
+            };
+
+            auto res = installer::NcmInstaller::installFromNsp(c->path, c->storageId, onProgress, c->cancel.get());
+
+            brls::sync([c, res]() {
+                if (c->dialogAlive->load()) {
+                    c->dialogAlive->store(false);
+                    c->dialog->close([c, res]() {
+                        if (res.success) {
+                            std::string msg = "¡Paquete instalado exitosamente!\n\n¿Deseas eliminar el archivo de instalación para ahorrar espacio en la tarjeta SD?";
+                            brls::Dialog* successDialog = new brls::Dialog(msg);
+                            successDialog->addButton("Conservar archivo", []() {});
+                            std::string fp = c->path;
+                            ExplorerTab* t = c->tab;
+                            successDialog->addButton("Eliminar .nsp", [fp, t]() {
+                                remove(fp.c_str());
+                                if (t) t->refreshList();
+                                brls::Application::notify("Archivo eliminado");
+                            });
+                            successDialog->open();
+                        } else {
+                            std::string err = "Error al instalar paquete:\n" + res.error;
+                            brls::Dialog* errDialog = new brls::Dialog(err);
+                            errDialog->addButton("hints/ok"_i18n, []() {});
+                            errDialog->open();
+                        }
+                        delete c;
+                    });
+                } else {
+                    delete c;
+                }
+            });
+
+            return nullptr;
+        }, ctx);
+
+        pthread_attr_destroy(&attr);
+        pthread_detach(th);
+    }
+
     // Menú contextual orgánico nativo de Horizon OS (Ancho fijo de 640px con iconos vectoriales)
     void showFileActionsDialog(const std::string& fullPath, const std::string& name, bool isDir, u64 sz, time_t mtime) {
         brls::Box* menuBox = new brls::Box(brls::Axis::COLUMN);
@@ -1423,6 +1648,20 @@ public:
                 m_selectedPaths.clear();
                 refreshList();
             });
+        }
+
+        // Instalar en consola (si es archivo .nsp)
+        if (!isMulti && !isDir) {
+            size_t dot = name.find_last_of('.');
+            if (dot != std::string::npos) {
+                std::string ext = name.substr(dot);
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                if (ext == ".nsp") {
+                    addActionRow("Instalar en consola", ActionIconType::INSTALL, nvgRGB(0, 230, 168), [this, fullPath, name]() {
+                        promptInstallNsp(fullPath, name);
+                    });
+                }
+            }
         }
 
         // Copiar

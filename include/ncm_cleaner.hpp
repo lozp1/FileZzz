@@ -3,19 +3,45 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <cstdio>
 
 namespace cleaner {
 
+struct OrphanItem {
+    NcmStorageId storageId;
+    NcmContentId contentId;
+    u64 size = 0;
+    std::string hexId;
+};
+
+struct ScanResult {
+    bool success = false;
+    std::vector<OrphanItem> items;
+    u64 totalBytes = 0;
+    u64 sdBytes = 0;
+    u64 nandBytes = 0;
+    size_t sdCount = 0;
+    size_t nandCount = 0;
+    std::string error;
+};
+
 struct CleanResult {
     bool success = false;
-    int placeholdersCleaned = 0;
     int orphansDeleted = 0;
     u64 bytesFreed = 0;
     std::string error;
 };
 
-inline CleanResult cleanStorage(NcmStorageId storageId) {
-    CleanResult res;
+inline std::string toHexId(const NcmContentId& id) {
+    char buf[33];
+    for (int i = 0; i < 16; i++) {
+        snprintf(buf + i * 2, 3, "%02x", id.c[i]);
+    }
+    return std::string(buf);
+}
+
+inline ScanResult scanStorage(NcmStorageId storageId) {
+    ScanResult res;
     Result rc = ncmInitialize();
     if (R_FAILED(rc)) {
         res.error = "Fallo al inicializar NCM";
@@ -39,10 +65,9 @@ inline CleanResult cleanStorage(NcmStorageId storageId) {
         return res;
     }
 
-    // 1. Limpiar todos los placeholders temporales
+    // Limpiar placeholders residuales
     ncmContentStorageCleanupAllPlaceHolder(&storage);
 
-    // 2. Listar todos los contenidos en disco
     s32 totalContents = 0;
     ncmContentStorageGetContentCount(&storage, &totalContents);
 
@@ -53,7 +78,6 @@ inline CleanResult cleanStorage(NcmStorageId storageId) {
         if (R_SUCCEEDED(rc) && readCount > 0) {
             contentIds.resize(readCount);
 
-            // Consultar huerfanos en lotes de 128
             const size_t BATCH = 128;
             for (size_t i = 0; i < contentIds.size(); i += BATCH) {
                 size_t count = std::min(BATCH, contentIds.size() - i);
@@ -64,9 +88,22 @@ inline CleanResult cleanStorage(NcmStorageId storageId) {
                         if (orphanFlags[j]) {
                             s64 sz = 0;
                             ncmContentStorageGetSizeFromContentId(&storage, &sz, &contentIds[i + j]);
-                            if (R_SUCCEEDED(ncmContentStorageDelete(&storage, &contentIds[i + j]))) {
-                                res.orphansDeleted++;
-                                if (sz > 0) res.bytesFreed += (u64)sz;
+                            u64 uSize = sz > 0 ? (u64)sz : 0;
+
+                            OrphanItem item;
+                            item.storageId = storageId;
+                            item.contentId = contentIds[i + j];
+                            item.size = uSize;
+                            item.hexId = toHexId(contentIds[i + j]);
+
+                            res.items.push_back(item);
+                            res.totalBytes += uSize;
+                            if (storageId == NcmStorageId_SdCard) {
+                                res.sdBytes += uSize;
+                                res.sdCount++;
+                            } else {
+                                res.nandBytes += uSize;
+                                res.nandCount++;
                             }
                         }
                     }
@@ -75,7 +112,6 @@ inline CleanResult cleanStorage(NcmStorageId storageId) {
         }
     }
 
-    ncmContentMetaDatabaseCommit(&metaDb);
     ncmContentMetaDatabaseClose(&metaDb);
     ncmContentStorageClose(&storage);
     ncmExit();
@@ -83,17 +119,60 @@ inline CleanResult cleanStorage(NcmStorageId storageId) {
     return res;
 }
 
-inline CleanResult cleanAllOrphans() {
-    CleanResult sdRes = cleanStorage(NcmStorageId_SdCard);
-    CleanResult nandRes = cleanStorage(NcmStorageId_BuiltInUser);
-    CleanResult total;
-    total.success = sdRes.success || nandRes.success;
-    total.orphansDeleted = sdRes.orphansDeleted + nandRes.orphansDeleted;
-    total.bytesFreed = sdRes.bytesFreed + nandRes.bytesFreed;
-    if (!sdRes.success && !nandRes.success) {
-        total.error = sdRes.error + " | " + nandRes.error;
+inline ScanResult scanAllOrphans() {
+    ScanResult sd = scanStorage(NcmStorageId_SdCard);
+    ScanResult nand = scanStorage(NcmStorageId_BuiltInUser);
+
+    ScanResult total;
+    total.success = sd.success || nand.success;
+    total.items.insert(total.items.end(), sd.items.begin(), sd.items.end());
+    total.items.insert(total.items.end(), nand.items.begin(), nand.items.end());
+    total.sdBytes = sd.sdBytes;
+    total.sdCount = sd.sdCount;
+    total.nandBytes = nand.nandBytes;
+    total.nandCount = nand.nandCount;
+    total.totalBytes = sd.sdBytes + nand.nandBytes;
+
+    if (!sd.success && !nand.success) {
+        total.error = sd.error + " | " + nand.error;
     }
     return total;
+}
+
+inline CleanResult deleteOrphans(const std::vector<OrphanItem>& items) {
+    CleanResult res;
+    if (items.empty()) {
+        res.success = true;
+        return res;
+    }
+
+    Result rc = ncmInitialize();
+    if (R_FAILED(rc)) {
+        res.error = "Fallo al inicializar NCM";
+        return res;
+    }
+
+    NcmContentStorage sdStorage = {};
+    NcmContentStorage nandStorage = {};
+    bool sdOpen = R_SUCCEEDED(ncmOpenContentStorage(&sdStorage, NcmStorageId_SdCard));
+    bool nandOpen = R_SUCCEEDED(ncmOpenContentStorage(&nandStorage, NcmStorageId_BuiltInUser));
+
+    for (const auto& it : items) {
+        NcmContentStorage* cs = (it.storageId == NcmStorageId_SdCard) ? (sdOpen ? &sdStorage : nullptr) : (nandOpen ? &nandStorage : nullptr);
+        if (!cs) continue;
+
+        if (R_SUCCEEDED(ncmContentStorageDelete(cs, &it.contentId))) {
+            res.orphansDeleted++;
+            res.bytesFreed += it.size;
+        }
+    }
+
+    if (sdOpen) ncmContentStorageClose(&sdStorage);
+    if (nandOpen) ncmContentStorageClose(&nandStorage);
+    ncmExit();
+
+    res.success = true;
+    return res;
 }
 
 } // namespace cleaner

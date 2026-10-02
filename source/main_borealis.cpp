@@ -2433,40 +2433,90 @@ public:
     }
 
     void promptCleanOrphans() {
-        brls::Dialog* d = new brls::Dialog("¿Deseas buscar y eliminar archivos huérfanos?\n\nEsto liberará espacio borrando datos de instalaciones incompletas o residuos no registrados en la microSD y memoria interna, sin tocar tus juegos instalados.");
-        d->addButton("hints/cancel"_i18n, []() {});
-        d->addButton("Limpiar ahora", [this]() {
-            brls::Application::notify("Escaneando y limpiando archivos huérfanos...");
-            std::thread([this]() {
-                auto res = cleaner::cleanAllOrphans();
-                brls::sync([this, res]() {
-                    updateStorageGauges();
-                    if (res.success) {
-                        char msg[256];
-                        double mb = (double)res.bytesFreed / (1024.0 * 1024.0);
-                        if (res.orphansDeleted > 0) {
-                            if (mb >= 1024.0) {
-                                snprintf(msg, sizeof(msg), "¡Limpieza completada!\n\nSe eliminaron %d archivos huérfanos liberando %.2f GB de espacio.",
-                                         res.orphansDeleted, mb / 1024.0);
+        brls::Application::notify("Buscando archivos huérfanos...");
+        std::thread([this]() {
+            auto scan = cleaner::scanAllOrphans();
+            brls::sync([this, scan]() {
+                if (!scan.success) {
+                    brls::Dialog* errDlg = new brls::Dialog("Error al inspeccionar almacenamiento:\n" + scan.error);
+                    errDlg->addButton("hints/ok"_i18n, []() {});
+                    errDlg->open();
+                    return;
+                }
+
+                if (scan.items.empty()) {
+                    brls::Dialog* okDlg = new brls::Dialog("¡Almacenamiento limpio!\n\nNo se encontraron archivos huérfanos. Todo el contenido en la consola pertenece a títulos registrados.");
+                    okDlg->addButton("hints/ok"_i18n, []() {});
+                    okDlg->open();
+                    return;
+                }
+
+                double totMb = (double)scan.totalBytes / (1024.0 * 1024.0);
+                double sdMb = (double)scan.sdBytes / (1024.0 * 1024.0);
+                double nandMb = (double)scan.nandBytes / (1024.0 * 1024.0);
+
+                std::string summary = "Se encontraron " + std::to_string(scan.items.size()) + " archivos huérfanos sin juego registrado:\n\n";
+                if (scan.sdCount > 0) {
+                    char b[128];
+                    if (sdMb >= 1024.0) snprintf(b, sizeof(b), "• Tarjeta microSD: %.2f GB (%zu archivos)\n", sdMb / 1024.0, scan.sdCount);
+                    else snprintf(b, sizeof(b), "• Tarjeta microSD: %.1f MB (%zu archivos)\n", sdMb, scan.sdCount);
+                    summary += b;
+                }
+                if (scan.nandCount > 0) {
+                    char b[128];
+                    if (nandMb >= 1024.0) snprintf(b, sizeof(b), "• Memoria NAND: %.2f GB (%zu archivos)\n", nandMb / 1024.0, scan.nandCount);
+                    else snprintf(b, sizeof(b), "• Memoria NAND: %.1f MB (%zu archivos)\n", nandMb, scan.nandCount);
+                    summary += b;
+                }
+
+                summary += "\nPrimeros archivos identificados:\n";
+                size_t previewLimit = std::min((size_t)4, scan.items.size());
+                for (size_t i = 0; i < previewLimit; i++) {
+                    const auto& it = scan.items[i];
+                    char b[128];
+                    double szMb = (double)it.size / (1024.0 * 1024.0);
+                    if (szMb >= 1024.0) snprintf(b, sizeof(b), "  - %s... (%.2f GB)\n", it.hexId.substr(0, 12).c_str(), szMb / 1024.0);
+                    else snprintf(b, sizeof(b), "  - %s... (%.1f MB)\n", it.hexId.substr(0, 12).c_str(), szMb);
+                    summary += b;
+                }
+                if (scan.items.size() > previewLimit) {
+                    summary += "  y " + std::to_string(scan.items.size() - previewLimit) + " más...\n";
+                }
+
+                summary += "\n¿Deseas eliminar estos archivos y recuperar el espacio?";
+
+                brls::Dialog* confirmDlg = new brls::Dialog(summary);
+                confirmDlg->addButton("hints/cancel"_i18n, []() {});
+
+                char btnTextBuf[64];
+                if (totMb >= 1024.0) snprintf(btnTextBuf, sizeof(btnTextBuf), "Eliminar (%.2f GB)", totMb / 1024.0);
+                else snprintf(btnTextBuf, sizeof(btnTextBuf), "Eliminar (%.1f MB)", totMb);
+
+                confirmDlg->addButton(btnTextBuf, [this, scan]() {
+                    brls::Application::notify("Eliminando archivos huérfanos...");
+                    std::thread([this, scan]() {
+                        auto delRes = cleaner::deleteOrphans(scan.items);
+                        brls::sync([this, delRes]() {
+                            updateStorageGauges();
+                            char resBuf[256];
+                            double freedMb = (double)delRes.bytesFreed / (1024.0 * 1024.0);
+                            if (freedMb >= 1024.0) {
+                                snprintf(resBuf, sizeof(resBuf), "¡Limpieza exitosa!\n\nSe eliminaron %d archivos liberando %.2f GB en tu almacenamiento.",
+                                         delRes.orphansDeleted, freedMb / 1024.0);
                             } else {
-                                snprintf(msg, sizeof(msg), "¡Limpieza completada!\n\nSe eliminaron %d archivos huérfanos liberando %.1f MB de espacio.",
-                                         res.orphansDeleted, mb);
+                                snprintf(resBuf, sizeof(resBuf), "¡Limpieza exitosa!\n\nSe eliminaron %d archivos liberando %.1f MB en tu almacenamiento.",
+                                         delRes.orphansDeleted, freedMb);
                             }
-                        } else {
-                            snprintf(msg, sizeof(msg), "No se encontraron archivos huérfanos.\nTu almacenamiento ya está limpio.");
-                        }
-                        brls::Dialog* resDlg = new brls::Dialog(msg);
-                        resDlg->addButton("hints/ok"_i18n, []() {});
-                        resDlg->open();
-                    } else {
-                        brls::Dialog* errDlg = new brls::Dialog("Error al limpiar huérfanos:\n" + res.error);
-                        errDlg->addButton("hints/ok"_i18n, []() {});
-                        errDlg->open();
-                    }
+                            brls::Dialog* finDlg = new brls::Dialog(resBuf);
+                            finDlg->addButton("hints/ok"_i18n, []() {});
+                            finDlg->open();
+                        });
+                    }).detach();
                 });
-            }).detach();
-        });
-        d->open();
+
+                confirmDlg->open();
+            });
+        }).detach();
     }
 
     static brls::View* create() {

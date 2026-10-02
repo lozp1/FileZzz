@@ -339,39 +339,11 @@ inline void unmountNandSys() {
     }
 }
 
-// Escanea recursivamente el Álbum para exponer todas las capturas y videos directamente en la raíz
-inline void mtpScanAlbumRecursive(u32 storage, const std::string& dirPath, std::vector<u32>& handles) {
-    DIR* d = opendir(dirPath.c_str());
-    if (!d) return;
-
-    struct dirent* e;
-    while ((e = readdir(d)) != NULL) {
-        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
-        std::string fp = mtpJoin(dirPath, e->d_name);
-        struct stat st;
-        if (stat(fp.c_str(), &st) != 0) continue;
-
-        if (S_ISDIR(st.st_mode)) {
-            mtpScanAlbumRecursive(storage, fp, handles);
-        } else {
-            std::string ext = "";
-            size_t dot = std::string(e->d_name).find_last_of('.');
-            if (dot != std::string::npos) ext = std::string(e->d_name).substr(dot);
-            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-
-            if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".mp4") {
-                u32 h = getOrRegisterHandle(storage, fp, 0, e->d_name, false, (u64)st.st_size, st.st_mtime);
-                handles.push_back(h);
-            }
-        }
+// Detecta la ruta raiz del Album de la consola
+inline std::string getPrimaryAlbumPath() {
+    if (access("sdmc:/Nintendo/Album", F_OK) == 0) {
+        return "sdmc:/Nintendo/Album";
     }
-    closedir(d);
-}
-
-// Escanea todas las fuentes posibles de Álbum (SD estándar, emuMMC RAW1/ER00 y NAND)
-inline void mtpScanAllAlbums(u32 storage, std::vector<u32>& handles) {
-    mtpScanAlbumRecursive(storage, "sdmc:/Nintendo/Album", handles);
-
     DIR* emuDir = opendir("sdmc:/emuMMC");
     if (emuDir) {
         struct dirent* e;
@@ -379,13 +351,32 @@ inline void mtpScanAllAlbums(u32 storage, std::vector<u32>& handles) {
             if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
             std::string p = mtpJoin("sdmc:/emuMMC", e->d_name);
             std::string alb = mtpJoin(p, "Nintendo/Album");
-            mtpScanAlbumRecursive(storage, alb, handles);
+            if (access(alb.c_str(), F_OK) == 0) {
+                closedir(emuDir);
+                return alb;
+            }
         }
         closedir(emuDir);
     }
+    mountNandUser();
+    if (access("user:/Album", F_OK) == 0) {
+        return "user:/Album";
+    }
+    return "sdmc:/Nintendo/Album";
+}
+
+// Escanea la raiz del Album mostrando carpetas (anos, Extra, NAND Album) al estilo DBI/Nintendo
+inline void mtpScanAlbumRoot(u32 storage, std::vector<u32>& handles) {
+    std::string albPath = getPrimaryAlbumPath();
+    handles = mtpScanDirectory(storage, albPath, 0);
 
     mountNandUser();
-    mtpScanAlbumRecursive(storage, "user:/Album", handles);
+    if (access("user:/Album", F_OK) == 0 && albPath != "user:/Album") {
+        u32 nh = getOrRegisterHandle(storage, "user:/Album", 0, "NAND Album", true, 0, time(nullptr));
+        if (std::find(handles.begin(), handles.end(), nh) == handles.end()) {
+            handles.push_back(nh);
+        }
+    }
 }
 
 // Prepara las particiones virtuales de instalacion al estilo DBI (SD y NAND)
@@ -877,7 +868,7 @@ inline void worker() {
                 mtpScanDirectory(STORAGE_SD, "sdmc:/", 0);
             }
             std::vector<u32> aHs;
-            mtpScanAllAlbums(STORAGE_ALBUM, aHs);
+            mtpScanAlbumRoot(STORAGE_ALBUM, aHs);
             std::vector<u32> iHs;
             mtpScanInstaller(STORAGE_INSTALL_SD, iHs);
             mtpScanInstaller(STORAGE_INSTALL_NAND, iHs);
@@ -931,6 +922,7 @@ inline void worker() {
                 }
             } else {
                 if (storage == STORAGE_ALBUM) {
+                    scanPath = getPrimaryAlbumPath();
                     targetStorage = STORAGE_ALBUM;
                 } else if (storage == STORAGE_INSTALL_SD) {
                     targetStorage = STORAGE_INSTALL_SD;
@@ -965,7 +957,7 @@ inline void worker() {
             }
             if (hs.empty()) {
                 if (targetStorage == STORAGE_ALBUM && targetParent == 0) {
-                    mtpScanAllAlbums(targetStorage, hs);
+                    mtpScanAlbumRoot(targetStorage, hs);
                 } else if (targetStorage == STORAGE_GAMES && targetParent == 0) {
                     mtpScanInstalledGames(targetStorage, hs);
                 } else if ((targetStorage == STORAGE_INSTALL_SD || targetStorage == STORAGE_INSTALL_NAND) && targetParent == 0) {
@@ -1053,7 +1045,7 @@ inline void worker() {
             if (filename.empty()) filename = "nuevo_archivo";
 
             std::string parentPath = "sdmc:/";
-            if (targetStorage == STORAGE_ALBUM) parentPath = "sdmc:/Nintendo/Album";
+            if (targetStorage == STORAGE_ALBUM) parentPath = getPrimaryAlbumPath();
             else if (targetStorage == STORAGE_INSTALL_SD) {
                 mkdir("sdmc:/switch", 0777);
                 mkdir("sdmc:/switch/FileZzz", 0777);

@@ -15,6 +15,7 @@
 #include "mtp_usb.hpp"
 #include "mtp_ops.hpp"
 #include "ncm_installer.hpp"
+#include "ncm_cleaner.hpp"
 #include "ftp_server.hpp"
 #include "config.hpp"
 #include "sys_clock.hpp"
@@ -1876,6 +1877,11 @@ public:
                 return true;
             });
 
+            this->registerAction("Limpiar huérfanos", brls::BUTTON_Y, [this](brls::View*) {
+                promptCleanOrphans();
+                return true;
+            });
+
             brls::Logger::info("GamesTab: buscando boxGamesList");
             brls::Box* boxGamesList = dynamic_cast<brls::Box*>(this->getView("boxGamesList"));
             if (boxGamesList) {
@@ -2423,6 +2429,43 @@ public:
 
         brls::Dialog* d = new brls::Dialog(card);
         d->addButton("hints/ok"_i18n, []() {});
+        d->open();
+    }
+
+    void promptCleanOrphans() {
+        brls::Dialog* d = new brls::Dialog("¿Deseas buscar y eliminar archivos huérfanos?\n\nEsto liberará espacio borrando datos de instalaciones incompletas o residuos no registrados en la microSD y memoria interna, sin tocar tus juegos instalados.");
+        d->addButton("hints/cancel"_i18n, []() {});
+        d->addButton("Limpiar ahora", [this]() {
+            brls::Application::notify("Escaneando y limpiando archivos huérfanos...");
+            std::thread([this]() {
+                auto res = cleaner::cleanAllOrphans();
+                brls::sync([this, res]() {
+                    updateStorageGauges();
+                    if (res.success) {
+                        char msg[256];
+                        double mb = (double)res.bytesFreed / (1024.0 * 1024.0);
+                        if (res.orphansDeleted > 0) {
+                            if (mb >= 1024.0) {
+                                snprintf(msg, sizeof(msg), "¡Limpieza completada!\n\nSe eliminaron %d archivos huérfanos liberando %.2f GB de espacio.",
+                                         res.orphansDeleted, mb / 1024.0);
+                            } else {
+                                snprintf(msg, sizeof(msg), "¡Limpieza completada!\n\nSe eliminaron %d archivos huérfanos liberando %.1f MB de espacio.",
+                                         res.orphansDeleted, mb);
+                            }
+                        } else {
+                            snprintf(msg, sizeof(msg), "No se encontraron archivos huérfanos.\nTu almacenamiento ya está limpio.");
+                        }
+                        brls::Dialog* resDlg = new brls::Dialog(msg);
+                        resDlg->addButton("hints/ok"_i18n, []() {});
+                        resDlg->open();
+                    } else {
+                        brls::Dialog* errDlg = new brls::Dialog("Error al limpiar huérfanos:\n" + res.error);
+                        errDlg->addButton("hints/ok"_i18n, []() {});
+                        errDlg->open();
+                    }
+                });
+            }).detach();
+        });
         d->open();
     }
 

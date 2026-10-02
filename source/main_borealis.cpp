@@ -1425,7 +1425,8 @@ public:
             btn->addView(l);
 
             btn->registerClickAction([this, d, fullPath, name, stId](brls::View*) {
-                d->close([this, fullPath, name, stId]() {
+                d->close();
+                brls::delay(120, [this, fullPath, name, stId]() {
                     startNspInstall(fullPath, name, stId);
                 });
                 return true;
@@ -1503,51 +1504,45 @@ public:
             ExplorerTab* tab;
         };
 
-        auto* ctx = new InstallContext{
+        auto ctx = std::make_shared<InstallContext>(InstallContext{
             fullPath, name, stId, cancelFlag, isDialogAlive, d, lblCurrent, barFill, lblStats, this
-        };
+        });
 
-        pthread_t th;
-        pthread_attr_t attr;
-        pthread_attr_init(&attr);
-        pthread_attr_setstacksize(&attr, 256 * 1024);
-
-        pthread_create(&th, &attr, [](void* arg) -> void* {
-            auto* c = static_cast<InstallContext*>(arg);
+        std::thread([ctx]() {
             auto lastUiUpdate = std::chrono::steady_clock::now();
 
-            auto onProgress = [c, &lastUiUpdate](u64 cur, u64 tot, float mbps, const std::string& ncaName) {
+            auto onProgress = [ctx, &lastUiUpdate](u64 cur, u64 tot, float mbps, const std::string& ncaName) {
                 auto now = std::chrono::steady_clock::now();
                 if (std::chrono::duration<double>(now - lastUiUpdate).count() < 0.1 && cur < tot) return;
                 lastUiUpdate = now;
 
-                if (!c->dialogAlive->load()) return;
+                if (!ctx->dialogAlive->load()) return;
                 float pct = (tot > 0) ? (float)cur / (float)tot : 0.0f;
                 if (pct > 1.0f) pct = 1.0f;
 
-                brls::sync([c, cur, tot, mbps, ncaName, pct]() {
-                    if (!c->dialogAlive->load()) return;
-                    c->lblCurrent->setText(ncaName);
-                    c->barFill->setWidth(pct * 512.0f);
+                brls::sync([ctx, cur, tot, mbps, ncaName, pct]() {
+                    if (!ctx->dialogAlive->load()) return;
+                    ctx->lblCurrent->setText(ncaName);
+                    ctx->barFill->setWidth(pct * 512.0f);
                     char buf[128];
                     snprintf(buf, sizeof(buf), "%.1f%% · %.1f MB / %.1f MB (%.1f MB/s)",
                              pct * 100.0f, cur / (1024.0 * 1024.0), tot / (1024.0 * 1024.0), mbps);
-                    c->lblStats->setText(buf);
+                    ctx->lblStats->setText(buf);
                 });
             };
 
-            auto res = installer::NcmInstaller::installFromNsp(c->path, c->storageId, onProgress, c->cancel.get());
+            auto res = installer::NcmInstaller::installFromNsp(ctx->path, ctx->storageId, onProgress, ctx->cancel.get());
 
-            brls::sync([c, res]() {
-                if (c->dialogAlive->load()) {
-                    c->dialogAlive->store(false);
-                    c->dialog->close([c, res]() {
+            brls::sync([ctx, res]() {
+                if (ctx->dialogAlive->load()) {
+                    ctx->dialogAlive->store(false);
+                    ctx->dialog->close([ctx, res]() {
                         if (res.success) {
                             std::string msg = "¡Paquete instalado exitosamente!\n\n¿Deseas eliminar el archivo de instalación para ahorrar espacio en la tarjeta SD?";
                             brls::Dialog* successDialog = new brls::Dialog(msg);
                             successDialog->addButton("Conservar archivo", []() {});
-                            std::string fp = c->path;
-                            ExplorerTab* t = c->tab;
+                            std::string fp = ctx->path;
+                            ExplorerTab* t = ctx->tab;
                             successDialog->addButton("Eliminar .nsp", [fp, t]() {
                                 remove(fp.c_str());
                                 if (t) t->refreshList();
@@ -1560,18 +1555,10 @@ public:
                             errDialog->addButton("hints/ok"_i18n, []() {});
                             errDialog->open();
                         }
-                        delete c;
                     });
-                } else {
-                    delete c;
                 }
             });
-
-            return nullptr;
-        }, ctx);
-
-        pthread_attr_destroy(&attr);
-        pthread_detach(th);
+        }).detach();
     }
 
     // Menú contextual orgánico nativo de Horizon OS (Ancho fijo de 640px con iconos vectoriales)
@@ -2478,15 +2465,20 @@ public:
             });
         }
 
-        // Botón B para volver al Menú Principal
-        this->registerAction("hints/back"_i18n, brls::BUTTON_B, [](brls::View*) {
+        // Boton B para volver al Menu Principal deteniendo MTP
+        this->registerAction("hints/back"_i18n, brls::BUTTON_B, [this](brls::View*) {
+            if (mtp_ops::running()) {
+                mtp_ops::stop();
+                mtp_usb::teardown();
+                updateUIState(false);
+            }
             brls::Application::popActivity();
             return true;
         });
 
         updateUIState(mtp_ops::running());
 
-        // Actualización de telemetría y bitácora periódica (4 Hz)
+        // Actualizacion de telemetria y bitacora periodica (4 Hz)
         updateTimer.setCallback([this]() {
             updateTelemetry();
         });
@@ -2495,6 +2487,10 @@ public:
 
     ~MtpTab() {
         updateTimer.stop();
+        if (mtp_ops::running()) {
+            mtp_ops::stop();
+            mtp_usb::teardown();
+        }
     }
 
     static brls::View* create() {
@@ -2681,13 +2677,23 @@ public:
             });
         }
 
-        // Botón B para volver al Menú Principal
-        this->registerAction("hints/back"_i18n, brls::BUTTON_B, [](brls::View*) {
+        // Boton B para volver al Menu Principal deteniendo FTP
+        this->registerAction("hints/back"_i18n, brls::BUTTON_B, [this](brls::View*) {
+            if (ftp_server::running()) {
+                ftp_server::stop();
+                updateFtpState(false);
+            }
             brls::Application::popActivity();
             return true;
         });
 
         updateFtpState(ftp_server::running());
+    }
+
+    ~FtpTab() {
+        if (ftp_server::running()) {
+            ftp_server::stop();
+        }
     }
 
     static brls::View* create() {

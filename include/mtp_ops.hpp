@@ -367,14 +367,49 @@ inline std::string getPrimaryAlbumPath() {
 
 // Escanea la raiz del Album mostrando carpetas (anos, Extra, NAND Album) al estilo DBI/Nintendo
 inline void mtpScanAlbumRoot(u32 storage, std::vector<u32>& handles) {
-    std::string albPath = getPrimaryAlbumPath();
-    handles = mtpScanDirectory(storage, albPath, 0);
+    // 1. Escanear sdmc:/Nintendo/Album si existe
+    if (access("sdmc:/Nintendo/Album", F_OK) == 0) {
+        auto hs = mtpScanDirectory(storage, "sdmc:/Nintendo/Album", 0);
+        handles.insert(handles.end(), hs.begin(), hs.end());
+    }
 
+    // 2. Escanear emuMMC si existe (sdmc:/emuMMC/<nombre>/Nintendo/Album)
+    DIR* emuDir = opendir("sdmc:/emuMMC");
+    if (emuDir) {
+        struct dirent* e;
+        while ((e = readdir(emuDir)) != NULL) {
+            if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+            std::string p = mtpJoin("sdmc:/emuMMC", e->d_name);
+            std::string alb = mtpJoin(p, "Nintendo/Album");
+            if (access(alb.c_str(), F_OK) == 0) {
+                auto hs = mtpScanDirectory(storage, alb, 0);
+                for (u32 h : hs) {
+                    if (std::find(handles.begin(), handles.end(), h) == handles.end()) {
+                        handles.push_back(h);
+                    }
+                }
+            }
+        }
+        closedir(emuDir);
+    }
+
+    // 3. NAND User: solo si realmente contiene capturas o subcarpetas
     mountNandUser();
-    if (access("user:/Album", F_OK) == 0 && albPath != "user:/Album") {
-        u32 nh = getOrRegisterHandle(storage, "user:/Album", 0, "NAND Album", true, 0, time(nullptr));
-        if (std::find(handles.begin(), handles.end(), nh) == handles.end()) {
-            handles.push_back(nh);
+    DIR* nd = opendir("user:/Album");
+    if (nd) {
+        bool hasContent = false;
+        struct dirent* ne;
+        while ((ne = readdir(nd)) != NULL) {
+            if (!strcmp(ne->d_name, ".") || !strcmp(ne->d_name, "..")) continue;
+            hasContent = true;
+            break;
+        }
+        closedir(nd);
+        if (hasContent) {
+            u32 nh = getOrRegisterHandle(storage, "user:/Album", 0, "NAND Album", true, 0, time(nullptr));
+            if (std::find(handles.begin(), handles.end(), nh) == handles.end()) {
+                handles.push_back(nh);
+            }
         }
     }
 }

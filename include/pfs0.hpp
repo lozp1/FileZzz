@@ -28,19 +28,28 @@ struct Pfs0File {
     u64 size;
 
     bool isCnmt() const {
-        return name.size() >= 9 && name.compare(name.size() - 9, 9, ".cnmt.nca") == 0;
+        std::string n = name;
+        for (auto& c : n) c = (char)::tolower((unsigned char)c);
+        return (n.size() >= 9 && n.compare(n.size() - 9, 9, ".cnmt.nca") == 0) ||
+               (n.find(".cnmt") != std::string::npos && n.find(".nca") != std::string::npos);
     }
 
     bool isNca() const {
-        return name.size() >= 4 && name.compare(name.size() - 4, 4, ".nca") == 0;
+        std::string n = name;
+        for (auto& c : n) c = (char)::tolower((unsigned char)c);
+        return n.size() >= 4 && n.compare(n.size() - 4, 4, ".nca") == 0;
     }
 
     bool isTicket() const {
-        return name.size() >= 4 && name.compare(name.size() - 4, 4, ".tik") == 0;
+        std::string n = name;
+        for (auto& c : n) c = (char)::tolower((unsigned char)c);
+        return n.size() >= 4 && n.compare(n.size() - 4, 4, ".tik") == 0;
     }
 
     bool isCert() const {
-        return name.size() >= 5 && name.compare(name.size() - 5, 5, ".cert") == 0;
+        std::string n = name;
+        for (auto& c : n) c = (char)::tolower((unsigned char)c);
+        return n.size() >= 5 && n.compare(n.size() - 5, 5, ".cert") == 0;
     }
 
     bool getNcaId(NcmContentId& outId) const {

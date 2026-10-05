@@ -40,13 +40,12 @@ struct PackagedContentInfo {
     u8 hash[0x20];
     NcmContentInfo content_info;
 };
-
-struct NcmContentStorageRecord {
-    NcmContentMetaKey key;
-    u8 storage_id;
-    u8 padding[7];
-};
 #pragma pack(pop)
+
+struct ContentStorageRecord {
+    NcmContentMetaKey metaRecord;
+    u64 storageId;
+};
 
 class NcmInstaller {
 public:
@@ -88,21 +87,22 @@ public:
             baseTitleId = (title_id ^ 0x1000) & ~0xFFFULL;
         }
 
-        NcmContentStorageRecord record = {};
-        record.key = key;
-        record.storage_id = (u8)storage_id;
+        ContentStorageRecord record = {};
+        record.metaRecord = key;
+        record.storageId = (u64)storage_id;
 
-        const struct {
+        struct {
             u8 last_modified_event;
-            u8 padding[7];
-            u64 tid;
-        } in = { 3 /* NsApplicationRecordType_Installed */, {0}, baseTitleId };
+            u64 application_id;
+        } in = { 3 /* NsApplicationRecordType_Installed */, baseTitleId };
 
         rc = serviceDispatchIn(&ns_srv, 16, in,
             .buffer_attrs = { SfBufferAttr_HipcMapAlias | SfBufferAttr_In },
             .buffers = { { &record, sizeof(record) } });
 
-        nsTouchApplication(baseTitleId);
+        if (R_SUCCEEDED(rc)) {
+            nsTouchApplication(baseTitleId);
+        }
 
         if (!hosversionBefore(3, 0, 0)) {
             serviceClose(&ns_srv);
@@ -171,6 +171,26 @@ public:
             }
         }
 
+        // Si no encontramos un .cnmt explícito en el nombre, buscar cualquier NCA pequeño que pueda serlo
+        if (!hasCnmt) {
+            for (const auto& pf : files) {
+                if (pf.isNca() && pf.size < 1024 * 1024) { // Menor a 1 MB suele ser el meta
+                    cnmtPf = pf;
+                    hasCnmt = true;
+                    break;
+                }
+            }
+        }
+
+        if (!hasCnmt) {
+            ncmContentMetaDatabaseClose(&metaDb);
+            ncmContentStorageClose(&storage);
+            ncmExit();
+            fclose(f);
+            res.error = "El archivo NSP no contiene metadatos validos (.cnmt.nca)";
+            return res;
+        }
+
         u64 installedBytes = 0;
         const size_t CHUNK_SIZE = 1024 * 1024; // 1 MB chunk
         std::vector<u8> chunk(CHUNK_SIZE);
@@ -179,6 +199,9 @@ public:
         auto lastSpeedTime = startTime;
         u64 bytesSinceLastSpeed = 0;
         float currentMbps = 0.0f;
+
+        // Lista de NCAs recién escritos para rollback automático si algo falla
+        std::vector<NcmContentId> newlyWrittenNcas;
 
         // 3. Escribir y registrar todos los NCA
         for (const auto& pf : files) {
@@ -281,26 +304,30 @@ public:
             }
 
             ncmContentStorageDeletePlaceHolder(&storage, &placeholderId);
+            newlyWrittenNcas.push_back(contentId);
         }
 
         // 4. Registro del CNMT y del registro de la aplicación en el Menú HOME
         if (res.error.empty()) {
-            if (hasCnmt) {
-                NcmContentId cnmtId = {};
-                if (cnmtPf.getNcaId(cnmtId)) {
-                    rc = registerCnmtAndAppRecord(storage, metaDb, targetStorage, cnmtId, cnmtPf.size, res.titleId);
-                    if (R_FAILED(rc)) {
-                        res.error = "Error al registrar metadatos CNMT / Menu HOME (0x" + toHex(rc) + ")";
-                    } else {
-                        ncmContentMetaDatabaseCommit(&metaDb);
-                        res.success = true;
-                    }
+            NcmContentId cnmtId = {};
+            if (cnmtPf.getNcaId(cnmtId)) {
+                rc = registerCnmtAndAppRecord(storage, metaDb, targetStorage, cnmtId, cnmtPf.size, res.titleId);
+                if (R_FAILED(rc)) {
+                    res.error = "Error al registrar metadatos / Menu HOME: 0x" + toHex(rc);
                 } else {
-                    res.error = "No se pudo obtener el ID del CNMT NCA";
+                    res.success = true;
                 }
             } else {
-                ncmContentMetaDatabaseCommit(&metaDb);
-                res.success = true;
+                res.error = "No se pudo obtener el ID del CNMT NCA";
+            }
+        }
+
+        // 5. ROLLBACK AUTOMÁTICO SI OCURRIÓ CUALQUIER FALLO
+        // Si no se pudo completar la instalación o registrar el icono, eliminamos
+        // de inmediato los archivos NCA recién escritos para no dejar basura ni huérfanos.
+        if (!res.success) {
+            for (const auto& nid : newlyWrittenNcas) {
+                ncmContentStorageDelete(&storage, &nid);
             }
         }
 
@@ -473,8 +500,14 @@ private:
         rc = ncmContentMetaDatabaseSet(&metaDb, &metaKey, installBuffer.data(), installBuffer.size());
         if (R_FAILED(rc)) return rc;
 
-        // Registrar aplicación en el Menú HOME
-        pushApplicationRecord(pkgHdr->title_id, targetStorage, metaKey);
+        // IMPORTANTE: Primero commitear la base de datos de NCM para que el sistema
+        // Horizon reconozca que el contenido existe antes de solicitar el registro en HOME.
+        rc = ncmContentMetaDatabaseCommit(&metaDb);
+        if (R_FAILED(rc)) return rc;
+
+        // Registrar aplicación en el Menú HOME y verificar resultado
+        rc = pushApplicationRecord(pkgHdr->title_id, targetStorage, metaKey);
+        if (R_FAILED(rc)) return rc;
 
         return 0;
     }
